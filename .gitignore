@@ -5,6 +5,9 @@ Config/tags.csv
 # Logs
 logs/
 
+# Database
+data/
+
 # Python
 __pycache__/
 *.pyc

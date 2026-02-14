@@ -1,4 +1,7 @@
-Name,NodeId,Type,Condition,Threshold,CountNeeded,Enable,MailTo,MailCc
-Device1_Temperature,ns=2;s=Channel1.Device1.Temperature,number,greater,100,3,True,,
-Device1_Status,ns=2;s=Channel1.Device1.Status,bool,equal,False,1,True,,
-Device1_Log,ns=2;s=Channel1.Device1.LogValue,log,,,1,True,,
+Name,NodeId,Server,Type,Condition,Threshold,CountNeeded,Enable,DeviceIP,DevicePort,MailTo,MailCc
+iFIX1_SecondError,ns=2;s=Channel1.iFIX1._System._SecondsSinceLastError,kepware_a,number,less,60,3,True,192.168.2.50,49310,,
+iFIX1_ErrorCount,ns=2;s=Channel1.iFIX1._System._ErrorCount,kepware_a,number,greater,10,3,True,192.168.2.50,49310,,
+iFIX2_SecondError,ns=2;s=Channel1.iFIX2._System._SecondsSinceLastError,kepware_a,number,less,60,3,True,192.168.2.51,49310,,
+iFIX3_SecondError,ns=2;s=Channel2.iFIX3._System._SecondsSinceLastError,kepware_b,number,less,60,3,True,10.0.1.20,49310,field-engineer@example.com,
+DeviceX_Status,ns=2;s=Channel1.DeviceX.Status,kepware_a,bool,equal,False,1,True,,,extra-person@example.com,
+LogOnly_Value,ns=2;s=Channel1.Device1.SomeValue,kepware_a,log,,,1,True,,,
