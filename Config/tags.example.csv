@@ -1,0 +1,4 @@
+Name,NodeId,Type,Condition,Threshold,CountNeeded,Enable,MailTo,MailCc
+Device1_Temperature,ns=2;s=Channel1.Device1.Temperature,number,greater,100,3,True,,
+Device1_Status,ns=2;s=Channel1.Device1.Status,bool,equal,False,1,True,,
+Device1_Log,ns=2;s=Channel1.Device1.LogValue,log,,,1,True,,

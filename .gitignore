@@ -1,0 +1,13 @@
+# Config files with real credentials
+Config/settings.ini
+Config/tags.csv
+
+# Logs
+logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
