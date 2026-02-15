@@ -21,7 +21,7 @@ class OPCConnection:
                  reconnect_delay=5, max_reconnect_delay=60):
         self.name = name
         self.url = url
-        self.client = Client(url=url)
+        self.client = None  # 延遲到 connect() 時才建立
         self.connected = False
         self.diagnostic = diagnostic_service or DiagnosticService()
         self.reconnect_delay = reconnect_delay
@@ -39,22 +39,26 @@ class OPCConnection:
         return self._last_diagnostic
 
     async def connect(self):
-        """連線到 OPC UA Server"""
+        """連線到 OPC UA Server（每次建立全新 Client，確保乾淨狀態）"""
         try:
+            # 每次連線都建立全新的 Client，避免舊狀態殘留
+            self.client = Client(url=self.url)
+            logging.info(f"[{self.name}] 正在連線 OPC UA Server: {self.url}")
             await self.client.connect()
             self.connected = True
             self._last_diagnostic = DiagnosticResult(DiagnosticResult.LEVEL_OK)
-            logging.info(f"[{self.name}] OPC UA 連線成功: {self.url}")
+            logging.info(f"[{self.name}] OPC UA 連線成功")
             return True
         except Exception as ex:
             self.connected = False
-            logging.error(f"[{self.name}] OPC UA 連線失敗: {ex}")
+            logging.error(f"[{self.name}] OPC UA 連線失敗: {type(ex).__name__}: {ex}")
             return False
 
     async def disconnect(self):
         """斷開連線"""
         try:
-            await self.client.disconnect()
+            if self.client:
+                await self.client.disconnect()
         except Exception:
             pass
         self.connected = False
@@ -156,6 +160,10 @@ class OPCConnection:
         while max_retries is None or attempt < max_retries:
             attempt += 1
             logging.info(f"[{self.name}] 嘗試連線 (第 {attempt} 次)...")
+
+            # 確保先斷開舊連線
+            if attempt > 1:
+                await self.disconnect()
 
             success = await self.connect()
             if success:
