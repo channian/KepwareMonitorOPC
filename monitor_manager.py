@@ -237,6 +237,7 @@ class MonitorManager:
         try:
             mtime = os.path.getmtime(self.tags_csv)
         except Exception:
+            logging.warning(f"CSV 檔案不存在或無法存取: {self.tags_csv}")
             return
 
         if self._csv_mtime is not None and mtime == self._csv_mtime:
@@ -529,10 +530,15 @@ class MonitorManager:
                         if d.server_name == conn_name and d.nodeid and d.enable
                     ]
                 if not server_devices:
+                    logging.debug(f"[{conn_name}] 無匹配的監控設備 "
+                                  f"(總設備數={len(self.devices)}, "
+                                  f"連線名稱='{conn_name}')")
                     continue
 
+                logging.info(f"[{conn_name}] 開始讀取 {len(server_devices)} 個設備...")
+
                 # ==========================================
-                # 讀值與重連（與舊版邏輯完全一致）
+                # 讀值與重連
                 # ==========================================
                 try:
                     values = await conn.read_values(
@@ -614,6 +620,10 @@ class MonitorManager:
             alert_type=diag_result.level if diag_result else "value",
             diagnostic=diag_result.message if diag_result else None,
         )
+
+        status = "異常" if is_alert else "正常"
+        log_and_print(f"[{conn_name}] {device.name} = {write_val} [{status}] "
+                      f"(counter={device.counter}/{device.accumulate})")
 
         # 派報邏輯
         is_triggered = device.counter >= device.accumulate
