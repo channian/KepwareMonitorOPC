@@ -1,6 +1,8 @@
 import asyncio
 import logging
 from asyncua import Client
+from asyncua.crypto.security_policies import SecurityPolicyBasic256Sha256, SecurityPolicyBasic256
+from asyncua.ua import MessageSecurityMode
 from urllib.parse import urlparse
 
 from diagnostic_service import DiagnosticService, DiagnosticResult
@@ -8,16 +10,25 @@ from diagnostic_service import DiagnosticService, DiagnosticResult
 
 class OPCConnection:
     """
-    OPC UA 連線管理 — 保留與舊版完全相同的連線模式。
-    只做薄包裝，不改變 asyncua Client 的使用方式。
+    OPC UA 連線管理 — 支援安全策略、安全模式與認證設定。
     """
 
-    def __init__(self, name, url, diagnostic_service=None):
+    def __init__(self, name, url, diagnostic_service=None,
+                 security_policy="None", security_mode="None",
+                 authentication="anonymous", username=None, password=None):
         self.name = name
         self.url = url
-        # 與舊版一樣：建立 Client 後直接 connect
+        self.security_policy = security_policy
+        self.security_mode = security_mode
+        self.authentication = authentication
+        self.username = username
+        self.password = password
+
         self.client = Client(url=url)
         self.connected = False
+
+        # 設定安全模式
+        self._apply_security_settings()
 
         # 診斷服務（選用）
         self.diagnostic = diagnostic_service or DiagnosticService()
@@ -25,11 +36,34 @@ class OPCConnection:
         self.host = parsed.hostname
         self.opc_port = parsed.port or 49320
 
+    def _apply_security_settings(self):
+        """套用 OPC UA 安全與認證設定"""
+        # 設定安全模式
+        mode_str = self.security_mode.strip().lower()
+        if mode_str in ("none", ""):
+            self.client.security_mode = MessageSecurityMode.None_
+        elif mode_str == "sign":
+            self.client.security_mode = MessageSecurityMode.Sign
+        elif mode_str in ("signandencrypt", "sign_and_encrypt"):
+            self.client.security_mode = MessageSecurityMode.SignAndEncrypt
+        else:
+            self.client.security_mode = MessageSecurityMode.None_
+            logging.warning(f"[{self.name}] 未知的 SecurityMode '{self.security_mode}'，使用 None")
+
+        # 設定認證方式
+        auth_str = self.authentication.strip().lower()
+        if auth_str == "username" and self.username:
+            self.client.set_user(self.username)
+            self.client.set_password(self.password or "")
+            logging.info(f"[{self.name}] 使用帳號密碼認證 (user={self.username})")
+        else:
+            logging.info(f"[{self.name}] 使用匿名認證")
+
+        logging.info(f"[{self.name}] 安全設定: Policy={self.security_policy}, "
+                     f"Mode={self.security_mode}, Auth={self.authentication}")
+
     async def connect(self):
-        """
-        連線到 OPC UA Server。
-        與舊版 `await client.connect()` 完全相同。
-        """
+        """連線到 OPC UA Server"""
         await self.client.connect()
         self.connected = True
         logging.info(f"[{self.name}] 已成功連接到 Kepware OPC UA 伺服器")

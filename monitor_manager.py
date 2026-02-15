@@ -112,6 +112,21 @@ class MonitorManager:
 
     def _parse_servers(self):
         """解析設定檔中的多 Kepware Server"""
+        # 讀取全域安全設定
+        security_policy = self.config.get("OPC", "SecurityPolicy", fallback="None").strip()
+        security_mode = self.config.get("OPC", "SecurityMode", fallback="None").strip()
+        authentication = self.config.get("OPC", "Authentication", fallback="anonymous").strip()
+        username = self.config.get("OPC", "Username", fallback="").strip() or None
+        password = self.config.get("OPC", "Password", fallback="").strip() or None
+
+        security_kwargs = dict(
+            security_policy=security_policy,
+            security_mode=security_mode,
+            authentication=authentication,
+            username=username,
+            password=password,
+        )
+
         servers_raw = self.config.get("OPC", "Servers", fallback="")
         if servers_raw.strip():
             for entry in servers_raw.split(","):
@@ -126,14 +141,16 @@ class MonitorManager:
                 name = name.strip()
                 url = url.strip()
                 self.connections[name] = OPCConnection(
-                    name=name, url=url, diagnostic_service=self.diagnostic
+                    name=name, url=url, diagnostic_service=self.diagnostic,
+                    **security_kwargs,
                 )
         else:
             # 向下相容：單一 ServerUrl
             url = self.config.get("OPC", "ServerUrl", fallback="")
             if url:
                 self.connections["default"] = OPCConnection(
-                    name="default", url=url, diagnostic_service=self.diagnostic
+                    name="default", url=url, diagnostic_service=self.diagnostic,
+                    **security_kwargs,
                 )
 
     # ===========================================
