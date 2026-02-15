@@ -450,17 +450,19 @@ class MonitorManager:
     # ===========================================
 
     async def start(self):
-        """啟動所有 OPC 連線並開始監控"""
+        """
+        啟動所有 OPC 連線並開始監控。
+        連線方式與舊版完全一致：直接 connect，失敗就拋出例外。
+        """
         # 初始載入 CSV
         logging.info("載入監控設備 CSV...")
         self.reload_csv_if_needed()
         logging.info(f"已載入 {len(self.devices)} 個監控項目")
 
-        # 啟動所有 OPC 連線（帶重試）
-        connect_tasks = []
+        # 逐一連線（與舊版一樣，直接 connect，失敗會拋出例外）
         for name, conn in self.connections.items():
-            connect_tasks.append(self._connect_server(name, conn))
-        await asyncio.gather(*connect_tasks)
+            log_and_print(f"[{name}] 正在連線到 {conn.url} ...")
+            await conn.connect()
 
         # 清理舊 DB 紀錄
         self.db.cleanup_old_records(days=90)
@@ -469,20 +471,11 @@ class MonitorManager:
         logging.info("進入主監控迴圈...")
         await self._monitor_loop()
 
-    async def _connect_server(self, name, conn):
-        """嘗試連線單一 Server（含重試）"""
-        log_and_print(f"[{name}] 正在連線到 {conn.url} ...")
-        success = await conn.connect_with_retry(max_retries=10)
-        if success:
-            log_and_print(f"[{name}] 連線成功")
-        else:
-            log_and_print(f"[{name}] 初始連線失敗，將在監控迴圈中持續重試")
-
     async def _monitor_loop(self):
-        """主監控迴圈"""
+        """
+        主監控迴圈 — 讀值與重連邏輯與舊版一致。
+        """
         last_csv_check = 0
-        # 追蹤各 Server 的連線層派報時間
-        conn_alert_times = {name: 0 for name in self.connections}
 
         while True:
             now = time.time()
@@ -502,49 +495,29 @@ class MonitorManager:
                 if not server_devices:
                     continue
 
-                # 檢查連線狀態
-                if not conn.connected:
-                    success, diag = await conn.reconnect_with_diagnosis()
-                    if not success:
-                        # 連線層派報（有間隔控制）
-                        last_conn_alert = conn_alert_times.get(conn_name, 0)
-                        if (now - last_conn_alert) >= self.alert_resend_interval:
-                            self.send_connection_alert(conn_name, diag)
-                            conn_alert_times[conn_name] = now
-
-                        # 所有該 Server 的設備寫入斷線狀態
-                        for d in server_devices:
-                            self.db.write_history(
-                                server_name=conn_name,
-                                device_name=d.name,
-                                nodeid=d.nodeid,
-                                value=None,
-                                threshold=d.threshold,
-                                condition=d.condition,
-                                counter=d.counter,
-                                is_alert=True,
-                                alert_type="connection",
-                                diagnostic=diag.message,
-                            )
-                        continue
-
-                # 心跳
-                hb_ok = await conn.heartbeat()
-                if not hb_ok:
-                    logging.warning(f"[{conn_name}] 心跳失敗，下次迴圈將重連")
-                    continue
-
-                # 讀值
+                # ==========================================
+                # 讀值與重連（與舊版邏輯完全一致）
+                # ==========================================
                 try:
                     values = await conn.read_values(
                         [{"nodeid": d.nodeid, "name": d.name} for d in server_devices]
                     )
                 except Exception as ex:
-                    log_and_print(f"[{conn_name}] 讀取失敗: {ex}")
-                    conn.connected = False
-                    continue
+                    log_and_print(f"[{conn_name}] 讀取失敗或連線斷掉: {ex}")
 
-                # 處理每個設備的數值
+                    # --- 舊版自動重連邏輯 ---
+                    success = await conn.reconnect()
+                    if success:
+                        log_and_print(f"[{conn_name}] 重新連線成功！立即重試讀取...")
+                        continue  # 跳回 while 開頭
+                    else:
+                        log_and_print(f"[{conn_name}] 將等待 30 秒後再次嘗試...")
+                        await asyncio.sleep(30)
+                        continue
+
+                # ==========================================
+                # 數據處理與警報
+                # ==========================================
                 current_ts = time.time()
                 for device, raw_value in zip(server_devices, values):
                     try:
