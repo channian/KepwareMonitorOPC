@@ -74,11 +74,14 @@ async def main():
     # 清理舊 log
     clean_old_logs(LOG_PATH, days=7)
 
-    # 建立 MonitorManager
-    manager = MonitorManager(config)
-
-    # 啟動監控
+    manager = None
     try:
+        # 建立 MonitorManager
+        logging.info("初始化 MonitorManager...")
+        manager = MonitorManager(config)
+        logging.info("MonitorManager 初始化完成")
+
+        # 啟動監控
         await manager.start()
     except KeyboardInterrupt:
         logging.info("收到中斷信號，正在停止...")
@@ -86,9 +89,13 @@ async def main():
         logging.exception(f"發生嚴重錯誤: {e}")
     finally:
         # 斷開所有 OPC 連線
-        for name, conn in manager.connections.items():
-            await conn.disconnect()
-            logging.info(f"[{name}] 已斷開連接")
+        if manager and manager.connections:
+            for name, conn in manager.connections.items():
+                try:
+                    await conn.disconnect()
+                    logging.info(f"[{name}] 已斷開連接")
+                except Exception:
+                    pass
         logging.info("監控程式已停止")
 
 

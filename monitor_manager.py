@@ -81,12 +81,12 @@ class MonitorManager:
         self.alert_resend_interval = config.getint("Monitor", "alertResendInterval", fallback=1800)
 
         # 全域派報設定
-        self.global_mail_to = [x.strip() for x in config.get("Mail", "To").split(",") if x.strip()]
-        self.global_mail_cc = [x.strip() for x in config.get("Mail", "Cc").split(",") if x.strip()]
-        self.mail_subject = config.get("Mail", "Subject")
+        self.global_mail_to = [x.strip() for x in config.get("Mail", "To", fallback="").split(",") if x.strip()]
+        self.global_mail_cc = [x.strip() for x in config.get("Mail", "Cc", fallback="").split(",") if x.strip()]
+        self.mail_subject = config.get("Mail", "Subject", fallback="Kepware 設備監控通知")
 
         # Tags CSV
-        self.tags_csv = config.get("Tags", "File")
+        self.tags_csv = config.get("Tags", "File", fallback="Config/tags.csv")
         self._csv_mtime = None
 
         # 服務元件
@@ -106,6 +106,9 @@ class MonitorManager:
 
         # 監控設備清單
         self.devices = []  # list of DeviceConfig
+
+        logging.info(f"MonitorManager 設定: 檢查間隔={self.check_interval}s, "
+                     f"CSV={self.tags_csv}, Server 數={len(self.connections)}")
 
     def _parse_servers(self):
         """解析設定檔中的多 Kepware Server"""
@@ -449,7 +452,9 @@ class MonitorManager:
     async def start(self):
         """啟動所有 OPC 連線並開始監控"""
         # 初始載入 CSV
+        logging.info("載入監控設備 CSV...")
         self.reload_csv_if_needed()
+        logging.info(f"已載入 {len(self.devices)} 個監控項目")
 
         # 啟動所有 OPC 連線（帶重試）
         connect_tasks = []
@@ -461,6 +466,7 @@ class MonitorManager:
         self.db.cleanup_old_records(days=90)
 
         # 進入主迴圈
+        logging.info("進入主監控迴圈...")
         await self._monitor_loop()
 
     async def _connect_server(self, name, conn):
@@ -541,7 +547,10 @@ class MonitorManager:
                 # 處理每個設備的數值
                 current_ts = time.time()
                 for device, raw_value in zip(server_devices, values):
-                    await self._process_device(device, raw_value, conn_name, current_ts)
+                    try:
+                        await self._process_device(device, raw_value, conn_name, current_ts)
+                    except Exception as ex:
+                        logging.exception(f"[{conn_name}] 處理設備 {device.name} 發生錯誤: {ex}")
 
             # 等待下一輪
             log_and_print(f"等待 {self.check_interval} 秒後更新...")
