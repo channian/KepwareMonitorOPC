@@ -1,7 +1,5 @@
-Name,NodeId,Server,Type,Condition,Threshold,CountNeeded,Enable,DeviceIP,DevicePort,MailTo,MailCc
-iFIX1_SecondError,ns=2;s=Channel1.iFIX1._System._SecondsSinceLastError,kepware_a,number,less,60,3,True,192.168.2.50,49310,,
-iFIX1_ErrorCount,ns=2;s=Channel1.iFIX1._System._ErrorCount,kepware_a,number,greater,10,3,True,192.168.2.50,49310,,
-iFIX2_SecondError,ns=2;s=Channel1.iFIX2._System._SecondsSinceLastError,kepware_a,number,less,60,3,True,192.168.2.51,49310,,
-iFIX3_SecondError,ns=2;s=Channel2.iFIX3._System._SecondsSinceLastError,kepware_b,number,less,60,3,True,10.0.1.20,49310,field-engineer@example.com,
-DeviceX_Status,ns=2;s=Channel1.DeviceX.Status,kepware_a,bool,equal,False,1,True,,,extra-person@example.com,
-LogOnly_Value,ns=2;s=Channel1.Device1.SomeValue,kepware_a,log,,,1,True,,,
+Name,NodeId,Description,MailTo,MailCc,Type,Condition,Threshold,CountNeeded,Enable,Server,DeviceIP,DevicePort
+K21GMS,ns=2;s=K21GMS.GMS._System._SecondsInError,K21GMS,,,number,greater,300,1,TRUE,,,
+K21HVAC,ns=2;s=K21HVAC.HVAC._System._SecondsInError,K21HVAC,,,number,greater,300,1,TRUE,,,
+ModbusTCP.K18_Notfier31,ns=2;s=ModbusTCP.K18_Notfier31._System._Error,K18_BMS1,,,bool,equal,TRUE,2,TRUE,,,
+K_1F_PMS_MP1_5_KWH_TOT,ns=2;s=plc.1.PMS.K_1F_PMS_MP1_5_KWH_TOT,K1_PMS,,,log,,,,TRUE,,,

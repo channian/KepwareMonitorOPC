@@ -573,6 +573,42 @@ class MonitorManager:
 
     async def _process_device(self, device, raw_value, conn_name, current_ts):
         """處理單一設備的數值判斷與派報"""
+        # 檢查讀值是否為 None（Tag 不存在或讀取失敗）
+        if raw_value is None and device.device_type != "log":
+            device.counter += 1
+            logging.warning(f"[{conn_name}] {device.name} 讀取值為 None "
+                            f"(NodeId={device.nodeid})，Tag 可能不存在或讀取失敗 "
+                            f"(counter={device.counter}/{device.accumulate})")
+
+            self.db.write_history(
+                server_name=conn_name,
+                device_name=device.name,
+                nodeid=device.nodeid,
+                value=None,
+                threshold=device.threshold,
+                condition=device.condition,
+                counter=device.counter,
+                is_alert=True,
+                alert_type="read_error",
+            )
+
+            # None 也要計入派報邏輯
+            is_triggered = device.counter >= device.accumulate
+            last_sent_ts = device.last_alert_time
+            time_since_last = current_ts - last_sent_ts
+
+            if is_triggered:
+                if last_sent_ts == 0 or time_since_last >= self.alert_resend_interval:
+                    log_and_print(
+                        f"[{conn_name}] [讀取異常] {device.name} 連續 {device.counter} 次讀取為 None"
+                    )
+                    self.send_device_alert(
+                        device, "None (Tag 不存在或讀取失敗)",
+                        is_recovery=False,
+                    )
+                    device.last_alert_time = current_ts
+            return
+
         is_alert, parsed_value = self.evaluate(device, raw_value)
         write_val = parsed_value if parsed_value is not None else raw_value
 
