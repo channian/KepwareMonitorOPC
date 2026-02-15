@@ -476,6 +476,17 @@ class MonitorManager:
         self.reload_csv_if_needed()
         logging.info(f"已載入 {len(self.devices)} 個監控項目")
 
+        # 檢查 CSV 中的 Server 名稱是否與連線設定匹配
+        conn_names = set(self.connections.keys())
+        csv_server_names = set(d.server_name for d in self.devices if d.enable)
+        unmatched = csv_server_names - conn_names
+        if unmatched and len(self.connections) == 1:
+            the_conn = list(conn_names)[0]
+            logging.info(f"單台模式：CSV 中的 Server 名稱 {unmatched} 將自動對應到 '{the_conn}'")
+        elif unmatched:
+            logging.warning(f"CSV 中有未匹配的 Server 名稱: {unmatched}，"
+                            f"可用連線: {conn_names}，這些設備將不會被監控！")
+
         # 逐一連線（與舊版一樣，直接 connect，失敗會拋出例外）
         for name, conn in self.connections.items():
             log_and_print(f"[{name}] 正在連線到 {conn.url} ...")
@@ -503,12 +514,20 @@ class MonitorManager:
                 last_csv_check = now
 
             # 依 Server 分組處理
+            is_single_server = len(self.connections) == 1
             for conn_name, conn in self.connections.items():
                 # 篩選此 Server 的設備
-                server_devices = [
-                    d for d in self.devices
-                    if d.server_name == conn_name and d.nodeid and d.enable
-                ]
+                # 單台模式：CSV 中 Server 名稱不論填什麼都歸到這台
+                if is_single_server:
+                    server_devices = [
+                        d for d in self.devices
+                        if d.nodeid and d.enable
+                    ]
+                else:
+                    server_devices = [
+                        d for d in self.devices
+                        if d.server_name == conn_name and d.nodeid and d.enable
+                    ]
                 if not server_devices:
                     continue
 
