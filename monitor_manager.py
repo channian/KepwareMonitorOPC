@@ -3,6 +3,7 @@ import csv
 import os
 import time
 import logging
+import concurrent.futures
 from datetime import datetime
 
 from diagnostic_service import DiagnosticService, DiagnosticResult
@@ -110,6 +111,9 @@ class MonitorManager:
 
         # 監控設備清單
         self.devices = []  # list of DeviceConfig
+
+        # 背景執行緒池（用於寄信、Webhook 等阻塞操作，避免卡住 event loop）
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
         logging.info(f"MonitorManager 設定: 檢查間隔={self.check_interval}s, "
                      f"CSV={self.tags_csv}, Server 數={len(self.connections)}")
@@ -682,10 +686,10 @@ class MonitorManager:
                     log_and_print(
                         f"[{conn_name}] [讀取異常] {device.name} 連續 {device.counter} 次讀取為 None"
                     )
-                    self.send_device_alert(
-                        device, "None (Tag 不存在或讀取失敗)",
-                        is_recovery=False,
-                    )
+                    loop = asyncio.get_event_loop()
+                    loop.run_in_executor(self._executor,
+                        self.send_device_alert,
+                        device, "None (Tag 不存在或讀取失敗)", False, None)
                     device.last_alert_time = current_ts
             return
 
@@ -758,11 +762,10 @@ class MonitorManager:
                         f"(已過 {int(time_since_last)} 秒)"
                     )
 
-                self.send_device_alert(
-                    device, write_val,
-                    is_recovery=False,
-                    diagnostic_result=diag_result,
-                )
+                loop = asyncio.get_event_loop()
+                loop.run_in_executor(self._executor,
+                    self.send_device_alert,
+                    device, write_val, False, diag_result)
                 device.last_alert_time = current_ts
 
         elif not is_alert and last_sent_ts > 0:
@@ -770,9 +773,9 @@ class MonitorManager:
             log_and_print(
                 f"[{conn_name}] [恢復] {device.name} 已恢復正常: {write_val}"
             )
-            self.send_device_alert(
-                device, write_val,
-                is_recovery=True,
-            )
+            loop = asyncio.get_event_loop()
+            loop.run_in_executor(self._executor,
+                self.send_device_alert,
+                device, write_val, True, None)
             device.last_alert_time = 0
             device.counter = 0
