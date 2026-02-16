@@ -3,6 +3,9 @@
 # OPC UA 連線
 asyncua>=1.0.0
 
+# Webhook 推播
+requests>=2.28.0
+
 # Web UI（選用，WebUI.Enable = true 時需要）
 fastapi>=0.100.0
 uvicorn>=0.20.0

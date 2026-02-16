@@ -125,6 +125,8 @@ class MonitorManager:
         token = self.config.get("Webhook", "Token", fallback="").strip()
         body_template = self.config.get("Webhook", "BodyTemplate", fallback="").strip()
         timeout = self.config.getint("Webhook", "Timeout", fallback=10)
+        verify_ssl = self.config.getboolean("Webhook", "VerifySSL", fallback=False)
+        use_proxy = self.config.getboolean("Webhook", "UseProxy", fallback=False)
         proxy_url = self.config.get("Webhook", "ProxyUrl", fallback="").strip()
 
         if not url or not body_template:
@@ -135,6 +137,8 @@ class MonitorManager:
         return WebhookService(
             url=url, token=token, body_template=body_template,
             enable=True, timeout=timeout,
+            verify_ssl=verify_ssl,
+            use_proxy=use_proxy,
             proxy_url=proxy_url or None,
         )
 

@@ -1,9 +1,12 @@
-import json
 import re
 import logging
-import urllib.request
-import urllib.error
 from datetime import datetime
+
+import requests
+import urllib3
+
+# 停用 InsecureRequestWarning（公司內部 API 使用自簽憑證時）
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class WebhookService:
@@ -12,11 +15,11 @@ class WebhookService:
       - 異常 / 復歸時呼叫外部 API（公司內部通訊軟體等）
       - 支援 {{$變數}} 模板替換
       - POST JSON + Bearer Token 認證
-      - 支援 HTTP/HTTPS Proxy
+      - 支援 Proxy 繞過（公司內網 API 直連）
     """
 
     def __init__(self, url, token, body_template, enable=True, timeout=10,
-                 proxy_url=None):
+                 verify_ssl=False, use_proxy=False, proxy_url=None):
         """
         Args:
             url: API endpoint URL
@@ -24,49 +27,33 @@ class WebhookService:
             body_template: JSON 字串模板，支援 {{$variable}} 變數替換
             enable: 是否啟用
             timeout: 請求逾時秒數
-            proxy_url: Proxy URL，例如 http://proxy.company.com:8080
+            verify_ssl: 是否驗證 SSL 憑證（內網 API 通常設 False）
+            use_proxy: 是否使用 Proxy（False = 直連，不走系統 Proxy）
+            proxy_url: 指定 Proxy URL（use_proxy=True 時有效）
         """
         self.url = url
         self.token = token
         self.body_template = body_template
         self.enable = enable
         self.timeout = timeout
+        self.verify_ssl = verify_ssl
 
-        # 建立 URL opener（支援 Proxy）
-        if proxy_url:
-            proxy_handler = urllib.request.ProxyHandler({
-                "http": proxy_url,
-                "https": proxy_url,
-            })
-            self._opener = urllib.request.build_opener(proxy_handler)
+        # Proxy 設定
+        if use_proxy and proxy_url:
+            self.proxies = {"http": proxy_url, "https": proxy_url}
             logging.info(f"Webhook 使用 Proxy: {proxy_url}")
+        elif use_proxy:
+            self.proxies = None  # 使用系統預設 Proxy
+            logging.info("Webhook 使用系統預設 Proxy")
         else:
-            # 使用系統預設（會讀取 Windows IE / 環境變數的 Proxy 設定）
-            self._opener = urllib.request.build_opener()
+            # 強制不走 Proxy（直連），適用於公司內網 API
+            self.proxies = {"http": None, "https": None}
+            logging.info("Webhook 直連模式（不走 Proxy）")
 
     def send(self, variables, db_service=None, server_name="", device_name="",
              is_recovery=False):
         """
         發送 Webhook 推播。
-
-        Args:
-            variables: dict，可用的模板變數，例如:
-                {
-                    "server_name": "kepware_a",
-                    "device_name": "K21GMS",
-                    "value": "500",
-                    "threshold": "300",
-                    "condition": "greater",
-                    "counter": "3",
-                    "diagnostic": "設備正常但數值異常",
-                    "message": "完整摘要訊息",
-                    "timestamp": "2025-01-01 12:00:00",
-                    "status": "異常",
-                }
-            db_service: DatabaseService instance（選填，用來寫入推播紀錄）
-            server_name: OPC Server 名稱
-            device_name: 設備名稱
-            is_recovery: 是否為復歸通知
         """
         if not self.enable or not self.url:
             return
@@ -80,27 +67,27 @@ class WebhookService:
         is_success = False
 
         try:
-            data = body_str.encode("utf-8")
-            req = urllib.request.Request(
-                self.url,
-                data=data,
-                method="POST",
-            )
-            req.add_header("Content-Type", "application/json; charset=utf-8")
+            headers = {"Content-Type": "application/json; charset=utf-8"}
             if self.token:
-                req.add_header("Authorization", f"Bearer {self.token}")
+                headers["Authorization"] = f"Bearer {self.token}"
 
-            with self._opener.open(req, timeout=self.timeout) as resp:
-                response_code = resp.status
-                response_body = resp.read().decode("utf-8", errors="replace")[:500]
-                is_success = 200 <= response_code < 300
+            resp = requests.post(
+                self.url,
+                data=body_str.encode("utf-8"),
+                headers=headers,
+                verify=self.verify_ssl,
+                proxies=self.proxies,
+                timeout=self.timeout,
+            )
 
-            logging.info(f"Webhook 推播成功: {device_name} (HTTP {response_code})")
+            response_code = resp.status_code
+            response_body = resp.text[:500]
+            is_success = 200 <= response_code < 300
 
-        except urllib.error.HTTPError as e:
-            response_code = e.code
-            response_body = e.read().decode("utf-8", errors="replace")[:500]
-            logging.warning(f"Webhook 推播失敗: {device_name} (HTTP {response_code}) {response_body}")
+            if is_success:
+                logging.info(f"Webhook 推播成功: {device_name} (HTTP {response_code})")
+            else:
+                logging.warning(f"Webhook 推播失敗: {device_name} (HTTP {response_code}) {response_body}")
 
         except Exception as ex:
             response_body = str(ex)[:500]
