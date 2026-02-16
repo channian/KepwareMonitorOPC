@@ -3,7 +3,7 @@ import csv
 import os
 import time
 import logging
-import concurrent.futures
+import threading
 from datetime import datetime
 
 from diagnostic_service import DiagnosticService, DiagnosticResult
@@ -111,9 +111,6 @@ class MonitorManager:
 
         # 監控設備清單
         self.devices = []  # list of DeviceConfig
-
-        # 背景執行緒池（用於寄信、Webhook 等阻塞操作，避免卡住 event loop）
-        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
         logging.info(f"MonitorManager 設定: 檢查間隔={self.check_interval}s, "
                      f"CSV={self.tags_csv}, Server 數={len(self.connections)}")
@@ -445,7 +442,7 @@ class MonitorManager:
         except Exception as ex:
             logging.warning(f"派報紀錄寫入失敗: {ex}")
 
-        # Webhook 推播
+        # Webhook 推播（daemon thread，不阻塞主程式）
         if self.webhook:
             try:
                 variables = self.webhook.build_variables(
@@ -459,15 +456,26 @@ class MonitorManager:
                     diagnostic_msg=diag_msg,
                     is_recovery=is_recovery,
                 )
+                self._fire_webhook(variables, device.server_name, device.name, is_recovery)
+            except Exception as ex:
+                logging.warning(f"Webhook 推播失敗: {ex}")
+
+    def _fire_webhook(self, variables, server_name, device_name, is_recovery):
+        """在 daemon thread 中發送 Webhook，不阻塞任何流程"""
+        def _do_send():
+            try:
                 self.webhook.send(
                     variables,
                     db_service=self.db,
-                    server_name=device.server_name,
-                    device_name=device.name,
+                    server_name=server_name,
+                    device_name=device_name,
                     is_recovery=is_recovery,
                 )
             except Exception as ex:
-                logging.warning(f"Webhook 推播失敗: {ex}")
+                logging.warning(f"Webhook 背景推播失敗: {ex}")
+
+        t = threading.Thread(target=_do_send, daemon=True)
+        t.start()
 
     def send_connection_alert(self, conn_name, diagnostic_result):
         """
@@ -537,13 +545,7 @@ class MonitorManager:
                     diagnostic_msg=diagnostic_result.message,
                     is_recovery=False,
                 )
-                self.webhook.send(
-                    variables,
-                    db_service=self.db,
-                    server_name=conn_name,
-                    device_name="",
-                    is_recovery=False,
-                )
+                self._fire_webhook(variables, conn_name, "", False)
             except Exception as ex:
                 logging.warning(f"連線 Webhook 推播失敗: {ex}")
 
@@ -686,10 +688,10 @@ class MonitorManager:
                     log_and_print(
                         f"[{conn_name}] [讀取異常] {device.name} 連續 {device.counter} 次讀取為 None"
                     )
-                    loop = asyncio.get_event_loop()
-                    loop.run_in_executor(self._executor,
-                        self.send_device_alert,
-                        device, "None (Tag 不存在或讀取失敗)", False, None)
+                    self.send_device_alert(
+                        device, "None (Tag 不存在或讀取失敗)",
+                        is_recovery=False,
+                    )
                     device.last_alert_time = current_ts
             return
 
@@ -762,10 +764,11 @@ class MonitorManager:
                         f"(已過 {int(time_since_last)} 秒)"
                     )
 
-                loop = asyncio.get_event_loop()
-                loop.run_in_executor(self._executor,
-                    self.send_device_alert,
-                    device, write_val, False, diag_result)
+                self.send_device_alert(
+                    device, write_val,
+                    is_recovery=False,
+                    diagnostic_result=diag_result,
+                )
                 device.last_alert_time = current_ts
 
         elif not is_alert and last_sent_ts > 0:
@@ -773,9 +776,9 @@ class MonitorManager:
             log_and_print(
                 f"[{conn_name}] [恢復] {device.name} 已恢復正常: {write_val}"
             )
-            loop = asyncio.get_event_loop()
-            loop.run_in_executor(self._executor,
-                self.send_device_alert,
-                device, write_val, True, None)
+            self.send_device_alert(
+                device, write_val,
+                is_recovery=True,
+            )
             device.last_alert_time = 0
             device.counter = 0
