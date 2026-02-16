@@ -21,17 +21,6 @@ class WebhookService:
 
     def __init__(self, url, token, body_template, enable=True, timeout=10,
                  verify_ssl=False, use_proxy=False, proxy_url=None):
-        """
-        Args:
-            url: API endpoint URL
-            token: Bearer Token
-            body_template: JSON 字串模板，支援 {{$variable}} 變數替換
-            enable: 是否啟用
-            timeout: 請求逾時秒數
-            verify_ssl: 是否驗證 SSL 憑證（內網 API 通常設 False）
-            use_proxy: 是否使用 Proxy（False = 直連，不走系統 Proxy）
-            proxy_url: 指定 Proxy URL（use_proxy=True 時有效）
-        """
         self.url = url
         self.token = token
         self.body_template = body_template
@@ -61,6 +50,7 @@ class WebhookService:
 
         # 替換模板變數 {{$variable}}
         body_str = self._render_template(self.body_template, variables)
+        raw_body = body_str  # 預設值，後面可能被覆寫
 
         # 發送 HTTP POST
         response_code = 0
@@ -68,49 +58,60 @@ class WebhookService:
         is_success = False
 
         try:
-            # 將模板渲染結果解析為 dict，用 json= 傳送（與 requests.post(json=...) 一致）
+            # 將模板渲染結果解析為 dict
             try:
                 post_data = json.loads(body_str)
             except json.JSONDecodeError as je:
                 logging.warning(f"Webhook Body 模板解析失敗（非合法 JSON）: {je}")
-                logging.warning(f"Body 內容: {body_str[:200]}")
+                logging.warning(f"Body 內容: {body_str[:500]}")
                 post_data = None
 
-            headers = {}
+            headers = {
+                "Content-Type": "application/json; charset=utf-8",
+            }
             if self.token:
                 headers["Authorization"] = f"Bearer {self.token}"
 
+            # 用 data= + ensure_ascii=False 傳送原生 UTF-8
+            # （某些 API 不接受 \uXXXX unicode escape，必須用原生中文）
             if post_data is not None:
-                # 用 json= 參數（自動設定 Content-Type: application/json）
-                resp = requests.post(
-                    self.url,
-                    json=post_data,
-                    headers=headers,
-                    verify=self.verify_ssl,
-                    proxies=self.proxies,
-                    timeout=self.timeout,
-                )
+                raw_body = json.dumps(post_data, ensure_ascii=False)
             else:
-                # fallback: 直接傳 raw string
-                headers["Content-Type"] = "application/json; charset=utf-8"
-                resp = requests.post(
-                    self.url,
-                    data=body_str.encode("utf-8"),
-                    headers=headers,
-                    verify=self.verify_ssl,
-                    proxies=self.proxies,
-                    timeout=self.timeout,
-                )
+                raw_body = body_str
+
+            # 診斷 log：顯示實際送出的內容
+            logging.info(f"Webhook 送出 → URL: {self.url}")
+            logging.info(f"Webhook 送出 → Headers: {headers}")
+            logging.info(f"Webhook 送出 → Body: {raw_body[:500]}")
+
+            resp = requests.post(
+                self.url,
+                data=raw_body.encode("utf-8"),
+                headers=headers,
+                verify=self.verify_ssl,
+                proxies=self.proxies,
+                timeout=(5, self.timeout),  # (連線逾時, 讀取逾時)
+            )
 
             response_code = resp.status_code
             response_body = resp.text[:500]
             is_success = 200 <= response_code < 300
 
-            if is_success:
-                logging.info(f"Webhook 推播成功: {device_name} (HTTP {response_code})")
-            else:
-                logging.warning(f"Webhook 推播失敗: {device_name} (HTTP {response_code}) {response_body}")
+            # 詳細 log：無論成功失敗都記錄 response
+            logging.info(
+                f"Webhook 回應 ← {device_name} "
+                f"HTTP {response_code} | Body: {response_body[:200]}"
+            )
 
+        except requests.exceptions.ConnectTimeout:
+            response_body = "連線逾時（無法連到 API server）"
+            logging.warning(f"Webhook 連線逾時: {device_name} - {self.url}")
+        except requests.exceptions.ReadTimeout:
+            response_body = "讀取逾時（API server 無回應）"
+            logging.warning(f"Webhook 讀取逾時: {device_name} - {self.url}")
+        except requests.exceptions.ConnectionError as ex:
+            response_body = f"連線失敗: {ex}"
+            logging.warning(f"Webhook 連線失敗: {device_name} - {ex}")
         except Exception as ex:
             response_body = str(ex)[:500]
             logging.warning(f"Webhook 推播發生錯誤: {device_name} - {ex}")
@@ -122,7 +123,7 @@ class WebhookService:
                     server_name=server_name,
                     device_name=device_name,
                     url=self.url,
-                    request_body=body_str[:1000],
+                    request_body=raw_body[:1000],
                     response_code=response_code,
                     response_body=response_body,
                     is_success=is_success,
@@ -181,3 +182,61 @@ class WebhookService:
             "timestamp": timestamp,
             "status": status,
         }
+
+    def test_send(self):
+        """
+        測試 Webhook 推播（送一筆測試訊息），回傳 (success, detail) 。
+        """
+        variables = self.build_variables(
+            server_name="測試Server",
+            device_name="測試設備",
+            value="999",
+            threshold="100",
+            condition=">",
+            counter=3,
+            accumulate=3,
+            diagnostic_msg="這是一則測試推播",
+            is_recovery=False,
+        )
+        body_str = self._render_template(self.body_template, variables)
+
+        try:
+            post_data = json.loads(body_str)
+        except json.JSONDecodeError as je:
+            return False, f"Body 模板解析失敗: {je}\n原始內容: {body_str[:300]}"
+
+        headers = {
+            "Content-Type": "application/json; charset=utf-8",
+        }
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+
+        raw_body = json.dumps(post_data, ensure_ascii=False)
+
+        detail_lines = [
+            f"URL: {self.url}",
+            f"Headers: {headers}",
+            f"Body: {raw_body}",
+            f"verify_ssl: {self.verify_ssl}",
+            f"proxies: {self.proxies}",
+            "",
+        ]
+
+        try:
+            resp = requests.post(
+                self.url,
+                data=raw_body.encode("utf-8"),
+                headers=headers,
+                verify=self.verify_ssl,
+                proxies=self.proxies,
+                timeout=(5, self.timeout),
+            )
+            detail_lines.append(f"HTTP {resp.status_code}")
+            detail_lines.append(f"Response Headers: {dict(resp.headers)}")
+            detail_lines.append(f"Response Body: {resp.text[:500]}")
+            ok = 200 <= resp.status_code < 300
+            return ok, "\n".join(detail_lines)
+
+        except Exception as ex:
+            detail_lines.append(f"Exception: {type(ex).__name__}: {ex}")
+            return False, "\n".join(detail_lines)

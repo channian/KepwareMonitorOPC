@@ -53,10 +53,13 @@ function renderSettings() {
 
     for (const [section, kvs] of Object.entries(settingsData)) {
         const icon = sectionIcons[section] || 'bi-folder';
+        const webhookBtn = section === 'Webhook'
+            ? ' <button class="btn btn-outline-primary btn-sm ms-2" onclick="testWebhook()"><i class="bi bi-send-check"></i> 測試推播</button>'
+            : '';
         html += `
             <div class="card mb-3">
-                <div class="card-header">
-                    <i class="bi ${icon}"></i> [${section}]
+                <div class="card-header d-flex align-items-center">
+                    <span><i class="bi ${icon}"></i> [${section}]</span>${webhookBtn}
                 </div>
                 <div class="card-body">`;
 
@@ -134,6 +137,34 @@ function saveSettings() {
         if (err.message === 'session expired') return;
         alertEl.className = 'alert alert-danger mb-3';
         alertEl.textContent = '儲存失敗: ' + err;
+    });
+}
+
+function testWebhook() {
+    const alertEl = document.getElementById('saveAlert');
+    alertEl.className = 'alert alert-info mb-3';
+    alertEl.textContent = 'Webhook 測試中...';
+    alertEl.classList.remove('d-none');
+
+    fetch('/api/webhook/test', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin',
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            alertEl.className = 'alert alert-success mb-3';
+        } else {
+            alertEl.className = 'alert alert-warning mb-3';
+        }
+        alertEl.innerHTML = '<strong>' + (data.ok ? 'Webhook 測試成功' : 'Webhook 測試失敗') +
+            '</strong><pre class="mt-2 mb-0" style="white-space:pre-wrap;font-size:0.8em;">' +
+            escapeHtml(data.detail || '') + '</pre>';
+    })
+    .catch(err => {
+        alertEl.className = 'alert alert-danger mb-3';
+        alertEl.textContent = 'Webhook 測試錯誤: ' + err;
     });
 }
 

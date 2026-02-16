@@ -502,6 +502,34 @@ def _write_config_preserve_format(config_path, config_obj, original_lines):
 
 
 # ===========================================
+# Webhook 測試
+# ===========================================
+
+@app.post("/api/webhook/test")
+async def api_webhook_test(request: Request):
+    """測試 Webhook 推播（發送一筆測試訊息）"""
+    user, err = _admin_or_403(request)
+    if err:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    if not monitor_manager or not monitor_manager.webhook:
+        return JSONResponse({
+            "ok": False,
+            "detail": "Webhook 未啟用或未設定。請確認 settings.ini [Webhook] Enable = true",
+        })
+
+    # 在背景執行緒中執行（避免阻塞 event loop）
+    import concurrent.futures
+    loop = asyncio.get_running_loop()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        ok, detail = await loop.run_in_executor(
+            pool, monitor_manager.webhook.test_send
+        )
+
+    return JSONResponse({"ok": ok, "detail": detail})
+
+
+# ===========================================
 # 帳號管理 (admin)
 # ===========================================
 
