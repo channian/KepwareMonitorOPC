@@ -102,29 +102,38 @@ function saveSettings() {
         sections[section][key] = el.value;
     });
 
-    const alert = document.getElementById('saveAlert');
+    const alertEl = document.getElementById('saveAlert');
+    alertEl.className = 'alert alert-info mb-3';
+    alertEl.textContent = '儲存中...';
+    alertEl.classList.remove('d-none');
 
     fetch('/api/settings', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin',
         body: JSON.stringify({sections}),
     })
-    .then(r => r.json())
+    .then(r => {
+        if (r.redirected || r.status === 401) {
+            window.location.href = '/login';
+            throw new Error('session expired');
+        }
+        return r.json();
+    })
     .then(data => {
         if (data.ok) {
-            alert.className = 'alert alert-success mb-3';
-            alert.textContent = data.message || '儲存成功';
+            alertEl.className = 'alert alert-success mb-3';
+            alertEl.textContent = data.message || '儲存成功';
         } else {
-            alert.className = 'alert alert-danger mb-3';
-            alert.textContent = '儲存失敗: ' + (data.error || '未知錯誤');
+            alertEl.className = 'alert alert-danger mb-3';
+            alertEl.textContent = '儲存失敗: ' + (data.error || '未知錯誤');
         }
-        alert.classList.remove('d-none');
-        setTimeout(() => alert.classList.add('d-none'), 5000);
+        setTimeout(() => alertEl.classList.add('d-none'), 5000);
     })
     .catch(err => {
-        alert.className = 'alert alert-danger mb-3';
-        alert.textContent = '儲存失敗: ' + err;
-        alert.classList.remove('d-none');
+        if (err.message === 'session expired') return;
+        alertEl.className = 'alert alert-danger mb-3';
+        alertEl.textContent = '儲存失敗: ' + err;
     });
 }
 

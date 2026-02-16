@@ -125,6 +125,7 @@ class MonitorManager:
         token = self.config.get("Webhook", "Token", fallback="").strip()
         body_template = self.config.get("Webhook", "BodyTemplate", fallback="").strip()
         timeout = self.config.getint("Webhook", "Timeout", fallback=10)
+        proxy_url = self.config.get("Webhook", "ProxyUrl", fallback="").strip()
 
         if not url or not body_template:
             logging.warning("Webhook 設定不完整（缺少 Url 或 BodyTemplate），已停用")
@@ -134,6 +135,7 @@ class MonitorManager:
         return WebhookService(
             url=url, token=token, body_template=body_template,
             enable=True, timeout=timeout,
+            proxy_url=proxy_url or None,
         )
 
     def _parse_servers(self):

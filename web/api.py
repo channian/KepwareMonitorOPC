@@ -345,24 +345,28 @@ async def api_tags_save(request: Request):
     if err:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
-    body = await request.json()
-    headers = body.get("headers", [])
-    rows = body.get("rows", [])
+    try:
+        body = await request.json()
+        headers = body.get("headers", [])
+        rows = body.get("rows", [])
 
-    if not headers:
-        return JSONResponse({"error": "no headers"}, status_code=400)
+        if not headers:
+            return JSONResponse({"error": "no headers"}, status_code=400)
 
-    csv_path = config.get("Tags", "File", fallback="Config/tags.csv")
-    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+        csv_path = config.get("Tags", "File", fallback="Config/tags.csv")
+        os.makedirs(os.path.dirname(csv_path), exist_ok=True)
 
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=headers)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({h: row.get(h, "") for h in headers})
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=headers)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow({h: row.get(h, "") for h in headers})
 
-    logging.info(f"Tags CSV 已由 {user['username']} 更新 ({len(rows)} 筆)")
-    return JSONResponse({"ok": True, "count": len(rows)})
+        logging.info(f"Tags CSV 已由 {user['username']} 更新 ({len(rows)} 筆)")
+        return JSONResponse({"ok": True, "count": len(rows)})
+    except Exception as ex:
+        logging.exception(f"Tags 儲存失敗: {ex}")
+        return JSONResponse({"error": str(ex)}, status_code=500)
 
 
 # ===========================================
@@ -407,26 +411,94 @@ async def api_settings_save(request: Request):
     if err:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
-    body = await request.json()
-    sections = body.get("sections", {})
+    try:
+        body = await request.json()
+        sections = body.get("sections", {})
 
-    sensitive_keys = {"password", "token", "secret"}
+        sensitive_keys = {"password", "token", "secret"}
 
-    for section, kvs in sections.items():
-        if not config.has_section(section):
-            config.add_section(section)
-        for key, value in kvs.items():
-            # 如果是 ********（未修改），保留原值
-            if any(s in key.lower() for s in sensitive_keys) and value == "********":
-                continue
-            config.set(section, key, value)
+        # 記錄原始 key 大小寫（configparser 預設會轉小寫）
+        config_path = "Config/settings.ini"
+        original_lines = []
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8-sig") as f:
+                original_lines = f.readlines()
 
-    config_path = "Config/settings.ini"
+        for section, kvs in sections.items():
+            if not config.has_section(section):
+                config.add_section(section)
+            for key, value in kvs.items():
+                if any(s in key.lower() for s in sensitive_keys) and value == "********":
+                    continue
+                config.set(section, key, value)
+
+        # 用原始格式寫回，保留 key 大小寫與註解
+        _write_config_preserve_format(config_path, config, original_lines)
+
+        logging.info(f"設定檔已由 {user['username']} 更新")
+        return JSONResponse({"ok": True, "message": "設定已儲存，部分設定需重啟程式才會生效"})
+    except Exception as ex:
+        logging.exception(f"設定儲存失敗: {ex}")
+        return JSONResponse({"error": str(ex)}, status_code=500)
+
+
+def _write_config_preserve_format(config_path, config_obj, original_lines):
+    """
+    寫入設定檔，盡量保留原始格式（註解、key 大小寫）。
+    若原始檔案存在，以原始行為基礎更新值；否則用 configparser 預設寫入。
+    """
+    if not original_lines:
+        with open(config_path, "w", encoding="utf-8") as f:
+            config_obj.write(f)
+        return
+
+    output = []
+    current_section = None
+
+    for line in original_lines:
+        stripped = line.strip()
+
+        # 空行或註解：保留
+        if not stripped or stripped.startswith("#") or stripped.startswith(";"):
+            output.append(line)
+            continue
+
+        # Section header
+        if stripped.startswith("[") and "]" in stripped:
+            current_section = stripped[1:stripped.index("]")]
+            output.append(line)
+            continue
+
+        # Key = Value
+        if current_section and "=" in stripped:
+            key_part = stripped.split("=", 1)[0].strip()
+            key_lower = key_part.lower()
+            if config_obj.has_option(current_section, key_lower):
+                new_value = config_obj.get(current_section, key_lower)
+                output.append(f"{key_part} = {new_value}\n")
+            else:
+                output.append(line)
+            continue
+
+        output.append(line)
+
+    # 寫入新增的 section/key（原始檔案沒有的）
+    existing_sections = set()
+    for line in original_lines:
+        s = line.strip()
+        if s.startswith("[") and "]" in s:
+            existing_sections.add(s[1:s.index("]")])
+
+    for section in config_obj.sections():
+        if section not in existing_sections:
+            output.append(f"\n[{section}]\n")
+            for key, value in config_obj.items(section):
+                if key == "__name__":
+                    continue
+                output.append(f"{key} = {value}\n")
+
     with open(config_path, "w", encoding="utf-8") as f:
-        config.write(f)
-
-    logging.info(f"設定檔已由 {user['username']} 更新")
-    return JSONResponse({"ok": True, "message": "設定已儲存，部分設定需重啟程式才會生效"})
+        f.writelines(output)
 
 
 # ===========================================

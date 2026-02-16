@@ -12,9 +12,11 @@ class WebhookService:
       - 異常 / 復歸時呼叫外部 API（公司內部通訊軟體等）
       - 支援 {{$變數}} 模板替換
       - POST JSON + Bearer Token 認證
+      - 支援 HTTP/HTTPS Proxy
     """
 
-    def __init__(self, url, token, body_template, enable=True, timeout=10):
+    def __init__(self, url, token, body_template, enable=True, timeout=10,
+                 proxy_url=None):
         """
         Args:
             url: API endpoint URL
@@ -22,12 +24,25 @@ class WebhookService:
             body_template: JSON 字串模板，支援 {{$variable}} 變數替換
             enable: 是否啟用
             timeout: 請求逾時秒數
+            proxy_url: Proxy URL，例如 http://proxy.company.com:8080
         """
         self.url = url
         self.token = token
         self.body_template = body_template
         self.enable = enable
         self.timeout = timeout
+
+        # 建立 URL opener（支援 Proxy）
+        if proxy_url:
+            proxy_handler = urllib.request.ProxyHandler({
+                "http": proxy_url,
+                "https": proxy_url,
+            })
+            self._opener = urllib.request.build_opener(proxy_handler)
+            logging.info(f"Webhook 使用 Proxy: {proxy_url}")
+        else:
+            # 使用系統預設（會讀取 Windows IE / 環境變數的 Proxy 設定）
+            self._opener = urllib.request.build_opener()
 
     def send(self, variables, db_service=None, server_name="", device_name="",
              is_recovery=False):
@@ -75,7 +90,7 @@ class WebhookService:
             if self.token:
                 req.add_header("Authorization", f"Bearer {self.token}")
 
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with self._opener.open(req, timeout=self.timeout) as resp:
                 response_code = resp.status
                 response_body = resp.read().decode("utf-8", errors="replace")[:500]
                 is_success = 200 <= response_code < 300
