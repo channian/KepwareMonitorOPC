@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}派報紀錄 - Kepware Monitor{% endblock %}
+{% block nav_alerts %}active{% endblock %}
+
+{% block content %}
+<h4 class="mb-3"><i class="bi bi-bell"></i> 派報紀錄</h4>
+
+<!-- 篩選 -->
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form class="row g-2 align-items-end" onsubmit="loadAlerts(); return false;">
+            <div class="col-auto">
+                <label class="form-label small mb-0">開始日期</label>
+                <input type="date" class="form-control form-control-sm" id="startDate">
+            </div>
+            <div class="col-auto">
+                <label class="form-label small mb-0">結束日期</label>
+                <input type="date" class="form-control form-control-sm" id="endDate">
+            </div>
+            <div class="col-auto">
+                <label class="form-label small mb-0">筆數</label>
+                <select class="form-select form-select-sm" id="limitSelect">
+                    <option value="50">50</option>
+                    <option value="200" selected>200</option>
+                    <option value="500">500</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-primary btn-sm">
+                    <i class="bi bi-search"></i> 查詢
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 結果 -->
+<div class="card">
+    <div class="card-header d-flex justify-content-between">
+        <span>派報紀錄</span>
+        <span id="resultCount" class="text-muted small"></span>
+    </div>
+    <div class="table-responsive" style="max-height: 70vh; overflow-y: auto;">
+        <table class="table table-hover table-sm mb-0">
+            <thead class="table-light sticky-top">
+                <tr>
+                    <th>時間</th>
+                    <th>類型</th>
+                    <th>Server</th>
+                    <th>設備</th>
+                    <th>主旨</th>
+                    <th>診斷等級</th>
+                    <th>診斷訊息</th>
+                    <th>收件人</th>
+                    <th>復歸</th>
+                </tr>
+            </thead>
+            <tbody id="alertsBody">
+                <tr><td colspan="9" class="text-center text-muted">請按查詢</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('endDate').value = new Date().toISOString().split('T')[0];
+
+function loadAlerts() {
+    const params = new URLSearchParams({
+        start_date: document.getElementById('startDate').value,
+        end_date: document.getElementById('endDate').value,
+        limit: document.getElementById('limitSelect').value,
+    });
+
+    fetch('/api/alerts?' + params)
+        .then(r => r.json())
+        .then(data => {
+            const rows = data.data || [];
+            document.getElementById('resultCount').textContent = rows.length + ' 筆';
+
+            if (rows.length === 0) {
+                document.getElementById('alertsBody').innerHTML =
+                    '<tr><td colspan="9" class="text-center text-muted">無資料</td></tr>';
+                return;
+            }
+
+            let html = '';
+            for (const r of rows) {
+                const recoveryBadge = r.is_recovery
+                    ? '<span class="badge bg-success">復歸</span>'
+                    : '<span class="badge bg-danger">異常</span>';
+                const typeClass = r.alert_type === 'connection' ? 'table-warning' :
+                                  r.is_recovery ? 'table-success' : 'table-danger';
+
+                let recipients = '';
+                try {
+                    const to = JSON.parse(r.recipients_to || '[]');
+                    recipients = to.join(', ');
+                } catch(e) {
+                    recipients = r.recipients_to || '';
+                }
+
+                html += `
+                    <tr class="${typeClass}">
+                        <td class="text-nowrap small">${r.timestamp}</td>
+                        <td><span class="badge bg-secondary">${r.alert_type || ''}</span></td>
+                        <td>${r.server_name || ''}</td>
+                        <td>${r.device_name || '-'}</td>
+                        <td class="small">${r.subject || ''}</td>
+                        <td>${r.diagnostic_level || '-'}</td>
+                        <td class="small">${r.diagnostic_msg || '-'}</td>
+                        <td class="small">${recipients}</td>
+                        <td class="text-center">${recoveryBadge}</td>
+                    </tr>`;
+            }
+            document.getElementById('alertsBody').innerHTML = html;
+        })
+        .catch(err => {
+            console.error(err);
+            document.getElementById('alertsBody').innerHTML =
+                '<tr><td colspan="9" class="text-center text-danger">查詢失敗</td></tr>';
+        });
+}
+</script>
+{% endblock %}

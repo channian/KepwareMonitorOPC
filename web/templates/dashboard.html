@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% block title %}狀態看板 - Kepware Monitor{% endblock %}
+{% block nav_dashboard %}active{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0"><i class="bi bi-speedometer2"></i> 狀態看板</h4>
+    <div class="d-flex align-items-center gap-3">
+        <span id="lastUpdate" class="text-muted small"></span>
+        <span id="sseStatus" class="badge bg-secondary">連線中...</span>
+    </div>
+</div>
+
+<!-- 連線狀態 -->
+<div class="row mb-3" id="connectionCards">
+    <!-- 動態產生 -->
+</div>
+
+<!-- 統計摘要 -->
+<div class="row mb-3">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body py-2">
+                <div class="text-muted small">總監控點數</div>
+                <div class="fs-4 fw-bold" id="totalDevices">-</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body py-2">
+                <div class="text-muted small">正常</div>
+                <div class="fs-4 fw-bold text-success" id="normalCount">-</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body py-2">
+                <div class="text-muted small">異常</div>
+                <div class="fs-4 fw-bold text-danger" id="alertCount">-</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body py-2">
+                <div class="text-muted small">停用</div>
+                <div class="fs-4 fw-bold text-secondary" id="disabledCount">-</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 設備列表 -->
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>監控設備</span>
+        <div>
+            <button class="btn btn-sm btn-outline-secondary" onclick="filterDevices('all')">全部</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="filterDevices('alert')">異常</button>
+            <button class="btn btn-sm btn-outline-success" onclick="filterDevices('normal')">正常</button>
+        </div>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover table-sm mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th style="width:40px">狀態</th>
+                    <th>設備名稱</th>
+                    <th>Server</th>
+                    <th>類型</th>
+                    <th>條件</th>
+                    <th>閾值</th>
+                    <th>累積</th>
+                    <th>診斷</th>
+                </tr>
+            </thead>
+            <tbody id="deviceTableBody">
+                <tr>
+                    <td colspan="8" class="text-center text-muted">載入中...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allDevices = [];
+let currentFilter = 'all';
+
+// 初始載入
+fetchStatus();
+
+// SSE 即時更新
+const evtSource = new EventSource('/api/dashboard/sse');
+evtSource.onmessage = function(event) {
+    const data = JSON.parse(event.data);
+    updateDashboard(data);
+    document.getElementById('sseStatus').className = 'badge bg-success';
+    document.getElementById('sseStatus').textContent = '即時連線';
+};
+evtSource.onerror = function() {
+    document.getElementById('sseStatus').className = 'badge bg-danger';
+    document.getElementById('sseStatus').textContent = '連線中斷';
+};
+
+function fetchStatus() {
+    fetch('/api/dashboard/status')
+        .then(r => r.json())
+        .then(data => updateDashboard(data))
+        .catch(err => console.error('Failed to fetch status:', err));
+}
+
+function updateDashboard(data) {
+    // 更新時間
+    document.getElementById('lastUpdate').textContent = '最後更新: ' + data.timestamp;
+
+    // 連線狀態卡片
+    const connDiv = document.getElementById('connectionCards');
+    let connHtml = '';
+    for (const [name, info] of Object.entries(data.connections || {})) {
+        const color = info.connected ? 'success' : 'danger';
+        const icon = info.connected ? 'bi-check-circle-fill' : 'bi-x-circle-fill';
+        const status = info.connected ? '已連線' : '斷線';
+        connHtml += `
+            <div class="col-auto">
+                <div class="card border-${color}">
+                    <div class="card-body py-2 px-3 d-flex align-items-center gap-2">
+                        <i class="bi ${icon} text-${color}"></i>
+                        <span class="fw-bold">${name}</span>
+                        <span class="badge bg-${color}">${status}</span>
+                    </div>
+                </div>
+            </div>`;
+    }
+    connDiv.innerHTML = connHtml;
+
+    // 設備資料
+    allDevices = data.devices || [];
+
+    // 統計
+    const enabled = allDevices.filter(d => d.enable);
+    const alertDevices = enabled.filter(d => d.is_alert);
+    const normalDevices = enabled.filter(d => !d.is_alert);
+    const disabled = allDevices.filter(d => !d.enable);
+
+    document.getElementById('totalDevices').textContent = allDevices.length;
+    document.getElementById('normalCount').textContent = normalDevices.length;
+    document.getElementById('alertCount').textContent = alertDevices.length;
+    document.getElementById('disabledCount').textContent = disabled.length;
+
+    renderDeviceTable();
+}
+
+function filterDevices(filter) {
+    currentFilter = filter;
+    renderDeviceTable();
+}
+
+function renderDeviceTable() {
+    let filtered = allDevices;
+    if (currentFilter === 'alert') {
+        filtered = allDevices.filter(d => d.enable && d.is_alert);
+    } else if (currentFilter === 'normal') {
+        filtered = allDevices.filter(d => d.enable && !d.is_alert);
+    }
+
+    const tbody = document.getElementById('deviceTableBody');
+    if (filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">無資料</td></tr>';
+        return;
+    }
+
+    let html = '';
+    for (const d of filtered) {
+        let statusIcon, statusClass;
+        if (!d.enable) {
+            statusIcon = '<i class="bi bi-dash-circle text-secondary"></i>';
+            statusClass = 'table-light text-muted';
+        } else if (d.is_alert) {
+            statusIcon = '<i class="bi bi-exclamation-triangle-fill text-danger"></i>';
+            statusClass = 'table-danger';
+        } else {
+            statusIcon = '<i class="bi bi-check-circle-fill text-success"></i>';
+            statusClass = '';
+        }
+
+        html += `
+            <tr class="${statusClass}">
+                <td class="text-center">${statusIcon}</td>
+                <td>${d.name}</td>
+                <td>${d.server_name}</td>
+                <td><span class="badge bg-info">${d.device_type}</span></td>
+                <td>${d.condition || '-'}</td>
+                <td>${d.threshold || '-'}</td>
+                <td>${d.counter}/${d.accumulate}</td>
+                <td class="small">${d.diagnostic || '-'}</td>
+            </tr>`;
+    }
+    tbody.innerHTML = html;
+}
+</script>
+{% endblock %}

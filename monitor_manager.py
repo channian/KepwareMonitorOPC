@@ -9,6 +9,7 @@ from diagnostic_service import DiagnosticService, DiagnosticResult
 from opc_connection import OPCConnection
 from db_service import DatabaseService
 from ase_email_service import EmailService
+from webhook_service import WebhookService
 
 
 def log_and_print(msg):
@@ -100,6 +101,9 @@ class MonitorManager:
             sender_email=config.get("Mail", "From"),
         )
 
+        # Webhook 推播
+        self.webhook = self._init_webhook()
+
         # OPC 連線（多 Server）
         self.connections = {}  # name -> OPCConnection
         self._parse_servers()
@@ -109,6 +113,28 @@ class MonitorManager:
 
         logging.info(f"MonitorManager 設定: 檢查間隔={self.check_interval}s, "
                      f"CSV={self.tags_csv}, Server 數={len(self.connections)}")
+
+    def _init_webhook(self):
+        """初始化 Webhook 推播服務"""
+        enable = self.config.getboolean("Webhook", "Enable", fallback=False)
+        if not enable:
+            logging.info("Webhook 推播未啟用")
+            return None
+
+        url = self.config.get("Webhook", "Url", fallback="").strip()
+        token = self.config.get("Webhook", "Token", fallback="").strip()
+        body_template = self.config.get("Webhook", "BodyTemplate", fallback="").strip()
+        timeout = self.config.getint("Webhook", "Timeout", fallback=10)
+
+        if not url or not body_template:
+            logging.warning("Webhook 設定不完整（缺少 Url 或 BodyTemplate），已停用")
+            return None
+
+        logging.info(f"Webhook 推播已啟用: {url}")
+        return WebhookService(
+            url=url, token=token, body_template=body_template,
+            enable=True, timeout=timeout,
+        )
 
     def _parse_servers(self):
         """解析設定檔中的多 Kepware Server"""
@@ -409,6 +435,30 @@ class MonitorManager:
         except Exception as ex:
             logging.warning(f"派報紀錄寫入失敗: {ex}")
 
+        # Webhook 推播
+        if self.webhook:
+            try:
+                variables = self.webhook.build_variables(
+                    server_name=device.server_name,
+                    device_name=device.name,
+                    value=value,
+                    threshold=device.threshold,
+                    condition=device.condition,
+                    counter=device.counter,
+                    accumulate=device.accumulate,
+                    diagnostic_msg=diag_msg,
+                    is_recovery=is_recovery,
+                )
+                self.webhook.send(
+                    variables,
+                    db_service=self.db,
+                    server_name=device.server_name,
+                    device_name=device.name,
+                    is_recovery=is_recovery,
+                )
+            except Exception as ex:
+                logging.warning(f"Webhook 推播失敗: {ex}")
+
     def send_connection_alert(self, conn_name, diagnostic_result):
         """
         發送連線層派報（Kepware 主機斷線等），通知 IT 基礎人員。
@@ -462,6 +512,30 @@ class MonitorManager:
             )
         except Exception as ex:
             logging.warning(f"連線派報紀錄寫入失敗: {ex}")
+
+        # Webhook 推播
+        if self.webhook:
+            try:
+                variables = self.webhook.build_variables(
+                    server_name=conn_name,
+                    device_name="(連線層)",
+                    value=label,
+                    threshold="",
+                    condition="",
+                    counter=0,
+                    accumulate=0,
+                    diagnostic_msg=diagnostic_result.message,
+                    is_recovery=False,
+                )
+                self.webhook.send(
+                    variables,
+                    db_service=self.db,
+                    server_name=conn_name,
+                    device_name="",
+                    is_recovery=False,
+                )
+            except Exception as ex:
+                logging.warning(f"連線 Webhook 推播失敗: {ex}")
 
     # ===========================================
     # 主監控迴圈

@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}Tags 管理 - Kepware Monitor{% endblock %}
+{% block nav_tags %}active{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0"><i class="bi bi-tags"></i> Tags 管理</h4>
+    <div>
+        <button class="btn btn-success btn-sm" onclick="addRow()">
+            <i class="bi bi-plus-lg"></i> 新增設備
+        </button>
+        <button class="btn btn-primary btn-sm" onclick="saveTags()">
+            <i class="bi bi-save"></i> 儲存
+        </button>
+    </div>
+</div>
+
+<div id="saveAlert" class="alert d-none mb-3"></div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover table-sm mb-0" id="tagsTable">
+            <thead class="table-light">
+                <tr id="tagsHeader">
+                    <th style="width:40px">操作</th>
+                </tr>
+            </thead>
+            <tbody id="tagsBody">
+                <tr><td class="text-center text-muted">載入中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="mt-2 text-muted small">
+    提示: 修改後請按「儲存」，CSV 會在下一次重載週期自動生效（無須重啟監控程式）
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let tagHeaders = [];
+let tagRows = [];
+
+loadTags();
+
+function loadTags() {
+    fetch('/api/tags')
+        .then(r => r.json())
+        .then(data => {
+            tagHeaders = data.headers || [];
+            tagRows = data.rows || [];
+            renderTable();
+        });
+}
+
+function renderTable() {
+    // Header
+    const headerRow = document.getElementById('tagsHeader');
+    let hHtml = '<th style="width:40px">操作</th>';
+    for (const h of tagHeaders) {
+        hHtml += `<th class="small">${h}</th>`;
+    }
+    headerRow.innerHTML = hHtml;
+
+    // Body
+    const tbody = document.getElementById('tagsBody');
+    if (tagRows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="' + (tagHeaders.length + 1) + '" class="text-center text-muted">無資料</td></tr>';
+        return;
+    }
+
+    let html = '';
+    for (let i = 0; i < tagRows.length; i++) {
+        html += '<tr>';
+        html += `<td>
+            <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="deleteRow(${i})" title="刪除">
+                <i class="bi bi-trash"></i>
+            </button>
+        </td>`;
+        for (const h of tagHeaders) {
+            const val = tagRows[i][h] || '';
+            const width = h === 'NodeId' ? 'min-width:280px' : h === 'Name' ? 'min-width:150px' : 'min-width:80px';
+            html += `<td><input type="text" class="form-control form-control-sm" style="${width}"
+                     value="${escapeHtml(val)}" data-row="${i}" data-col="${h}"
+                     onchange="updateCell(${i}, '${h}', this.value)"></td>`;
+        }
+        html += '</tr>';
+    }
+    tbody.innerHTML = html;
+}
+
+function updateCell(row, col, value) {
+    tagRows[row][col] = value;
+}
+
+function addRow() {
+    const newRow = {};
+    for (const h of tagHeaders) {
+        newRow[h] = '';
+    }
+    // 預設值
+    newRow['Enable'] = 'TRUE';
+    newRow['Type'] = 'number';
+    newRow['CountNeeded'] = '1';
+    tagRows.push(newRow);
+    renderTable();
+}
+
+function deleteRow(index) {
+    if (!confirm('確定要刪除此筆設備嗎?')) return;
+    tagRows.splice(index, 1);
+    renderTable();
+}
+
+function saveTags() {
+    const alert = document.getElementById('saveAlert');
+
+    fetch('/api/tags', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({headers: tagHeaders, rows: tagRows}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            alert.className = 'alert alert-success mb-3';
+            alert.textContent = '儲存成功 (' + data.count + ' 筆)';
+        } else {
+            alert.className = 'alert alert-danger mb-3';
+            alert.textContent = '儲存失敗: ' + (data.error || '未知錯誤');
+        }
+        alert.classList.remove('d-none');
+        setTimeout(() => alert.classList.add('d-none'), 3000);
+    })
+    .catch(err => {
+        alert.className = 'alert alert-danger mb-3';
+        alert.textContent = '儲存失敗: ' + err;
+        alert.classList.remove('d-none');
+    });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML.replace(/"/g, '&quot;');
+}
+</script>
+{% endblock %}

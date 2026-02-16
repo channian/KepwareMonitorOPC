@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}系統設定 - Kepware Monitor{% endblock %}
+{% block nav_settings %}active{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0"><i class="bi bi-gear"></i> 系統設定</h4>
+    <button class="btn btn-primary btn-sm" onclick="saveSettings()">
+        <i class="bi bi-save"></i> 儲存
+    </button>
+</div>
+
+<div id="saveAlert" class="alert d-none mb-3"></div>
+
+<div id="settingsContainer">
+    <div class="text-center text-muted">載入中...</div>
+</div>
+
+<div class="mt-2 text-muted small">
+    注意: 部分設定（如 OPC 連線、Web UI Port）需要重啟程式才會生效
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let settingsData = {};
+
+loadSettings();
+
+function loadSettings() {
+    fetch('/api/settings')
+        .then(r => r.json())
+        .then(data => {
+            settingsData = data.sections || {};
+            renderSettings();
+        });
+}
+
+function renderSettings() {
+    const container = document.getElementById('settingsContainer');
+    let html = '';
+
+    const sectionIcons = {
+        'OPC': 'bi-plug',
+        'Mail': 'bi-envelope',
+        'Monitor': 'bi-stopwatch',
+        'Tags': 'bi-file-earmark-spreadsheet',
+        'Database': 'bi-database',
+        'Log': 'bi-journal-text',
+        'WebUI': 'bi-globe',
+        'Webhook': 'bi-send',
+    };
+
+    for (const [section, kvs] of Object.entries(settingsData)) {
+        const icon = sectionIcons[section] || 'bi-folder';
+        html += `
+            <div class="card mb-3">
+                <div class="card-header">
+                    <i class="bi ${icon}"></i> [${section}]
+                </div>
+                <div class="card-body">`;
+
+        for (const [key, value] of Object.entries(kvs)) {
+            const inputType = value === '********' ? 'password' : 'text';
+            const isMultiline = value.length > 60 || value.includes('\n');
+
+            if (isMultiline) {
+                html += `
+                    <div class="row mb-2 align-items-start">
+                        <label class="col-sm-3 col-form-label small fw-bold">${key}</label>
+                        <div class="col-sm-9">
+                            <textarea class="form-control form-control-sm" rows="3"
+                                data-section="${section}" data-key="${key}">${escapeHtml(value)}</textarea>
+                        </div>
+                    </div>`;
+            } else {
+                html += `
+                    <div class="row mb-2 align-items-center">
+                        <label class="col-sm-3 col-form-label small fw-bold">${key}</label>
+                        <div class="col-sm-9">
+                            <input type="${inputType}" class="form-control form-control-sm"
+                                value="${escapeHtml(value)}"
+                                data-section="${section}" data-key="${key}">
+                        </div>
+                    </div>`;
+            }
+        }
+
+        html += '</div></div>';
+    }
+
+    container.innerHTML = html;
+}
+
+function saveSettings() {
+    // 收集所有欄位值
+    const sections = {};
+    document.querySelectorAll('[data-section]').forEach(el => {
+        const section = el.dataset.section;
+        const key = el.dataset.key;
+        if (!sections[section]) sections[section] = {};
+        sections[section][key] = el.value;
+    });
+
+    const alert = document.getElementById('saveAlert');
+
+    fetch('/api/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({sections}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            alert.className = 'alert alert-success mb-3';
+            alert.textContent = data.message || '儲存成功';
+        } else {
+            alert.className = 'alert alert-danger mb-3';
+            alert.textContent = '儲存失敗: ' + (data.error || '未知錯誤');
+        }
+        alert.classList.remove('d-none');
+        setTimeout(() => alert.classList.add('d-none'), 5000);
+    })
+    .catch(err => {
+        alert.className = 'alert alert-danger mb-3';
+        alert.textContent = '儲存失敗: ' + err;
+        alert.classList.remove('d-none');
+    });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML.replace(/"/g, '&quot;');
+}
+</script>
+{% endblock %}

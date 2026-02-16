@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+{% block title %}帳號管理 - Kepware Monitor{% endblock %}
+{% block nav_users %}active{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0"><i class="bi bi-people"></i> 帳號管理</h4>
+    <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addUserModal">
+        <i class="bi bi-person-plus"></i> 新增使用者
+    </button>
+</div>
+
+<div id="userAlert" class="alert d-none mb-3"></div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover table-sm mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>ID</th>
+                    <th>帳號</th>
+                    <th>顯示名稱</th>
+                    <th>角色</th>
+                    <th>建立時間</th>
+                    <th>最後登入</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody id="usersBody">
+                <tr><td colspan="7" class="text-center text-muted">載入中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Add User Modal -->
+<div class="modal fade" id="addUserModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">新增使用者</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">帳號</label>
+                    <input type="text" class="form-control" id="newUsername">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">密碼</label>
+                    <input type="password" class="form-control" id="newUserPassword">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">顯示名稱</label>
+                    <input type="text" class="form-control" id="newDisplayName">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">角色</label>
+                    <select class="form-select" id="newRole">
+                        <option value="viewer">viewer - 唯讀</option>
+                        <option value="admin">admin - 管理員</option>
+                    </select>
+                </div>
+                <div id="addUserAlert" class="alert d-none"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" onclick="createUser()">建立</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit User Modal -->
+<div class="modal fade" id="editUserModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">編輯使用者</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editUserId">
+                <div class="mb-3">
+                    <label class="form-label">帳號</label>
+                    <input type="text" class="form-control" id="editUsername" readonly>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">新密碼（留空不修改）</label>
+                    <input type="password" class="form-control" id="editPassword">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">顯示名稱</label>
+                    <input type="text" class="form-control" id="editDisplayName">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">角色</label>
+                    <select class="form-select" id="editRole">
+                        <option value="viewer">viewer - 唯讀</option>
+                        <option value="admin">admin - 管理員</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" onclick="updateUser()">儲存</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+loadUsers();
+
+function loadUsers() {
+    fetch('/api/users')
+        .then(r => r.json())
+        .then(data => {
+            const users = data.data || [];
+            const tbody = document.getElementById('usersBody');
+
+            if (users.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">無資料</td></tr>';
+                return;
+            }
+
+            let html = '';
+            for (const u of users) {
+                const roleBadge = u.role === 'admin'
+                    ? '<span class="badge bg-danger">admin</span>'
+                    : '<span class="badge bg-info">viewer</span>';
+
+                html += `
+                    <tr>
+                        <td>${u.id}</td>
+                        <td>${u.username}</td>
+                        <td>${u.display_name || ''}</td>
+                        <td>${roleBadge}</td>
+                        <td class="small">${u.created_at || ''}</td>
+                        <td class="small">${u.last_login || '-'}</td>
+                        <td>
+                            <button class="btn btn-outline-primary btn-sm py-0 px-1"
+                                onclick="editUser(${u.id}, '${u.username}', '${u.display_name || ''}', '${u.role}')">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            ${u.username !== 'admin' ? `
+                            <button class="btn btn-outline-danger btn-sm py-0 px-1"
+                                onclick="deleteUser(${u.id}, '${u.username}')">
+                                <i class="bi bi-trash"></i>
+                            </button>` : ''}
+                        </td>
+                    </tr>`;
+            }
+            tbody.innerHTML = html;
+        });
+}
+
+function createUser() {
+    const alert = document.getElementById('addUserAlert');
+    const body = {
+        username: document.getElementById('newUsername').value,
+        password: document.getElementById('newUserPassword').value,
+        display_name: document.getElementById('newDisplayName').value,
+        role: document.getElementById('newRole').value,
+    };
+
+    fetch('/api/users', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            bootstrap.Modal.getInstance(document.getElementById('addUserModal')).hide();
+            loadUsers();
+            showAlert('userAlert', 'success', '使用者建立成功');
+        } else {
+            alert.className = 'alert alert-danger';
+            alert.textContent = data.error || '建立失敗';
+            alert.classList.remove('d-none');
+        }
+    });
+}
+
+function editUser(id, username, displayName, role) {
+    document.getElementById('editUserId').value = id;
+    document.getElementById('editUsername').value = username;
+    document.getElementById('editDisplayName').value = displayName;
+    document.getElementById('editRole').value = role;
+    document.getElementById('editPassword').value = '';
+    new bootstrap.Modal(document.getElementById('editUserModal')).show();
+}
+
+function updateUser() {
+    const id = document.getElementById('editUserId').value;
+    const body = {
+        display_name: document.getElementById('editDisplayName').value,
+        role: document.getElementById('editRole').value,
+    };
+    const pw = document.getElementById('editPassword').value;
+    if (pw) body.password = pw;
+
+    fetch('/api/users/' + id, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            bootstrap.Modal.getInstance(document.getElementById('editUserModal')).hide();
+            loadUsers();
+            showAlert('userAlert', 'success', '使用者已更新');
+        }
+    });
+}
+
+function deleteUser(id, username) {
+    if (!confirm('確定要刪除使用者 ' + username + ' 嗎?')) return;
+
+    fetch('/api/users/' + id, {method: 'DELETE'})
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) {
+                loadUsers();
+                showAlert('userAlert', 'success', '使用者已刪除');
+            }
+        });
+}
+
+function showAlert(elementId, type, message) {
+    const el = document.getElementById(elementId);
+    el.className = 'alert alert-' + type + ' mb-3';
+    el.textContent = message;
+    el.classList.remove('d-none');
+    setTimeout(() => el.classList.add('d-none'), 3000);
+}
+</script>
+{% endblock %}

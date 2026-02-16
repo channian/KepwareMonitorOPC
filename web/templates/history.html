@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}監控歷史 - Kepware Monitor{% endblock %}
+{% block nav_history %}active{% endblock %}
+
+{% block content %}
+<h4 class="mb-3"><i class="bi bi-clock-history"></i> 監控歷史</h4>
+
+<!-- 篩選 -->
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form class="row g-2 align-items-end" onsubmit="loadHistory(); return false;">
+            <div class="col-auto">
+                <label class="form-label small mb-0">開始日期</label>
+                <input type="date" class="form-control form-control-sm" id="startDate">
+            </div>
+            <div class="col-auto">
+                <label class="form-label small mb-0">結束日期</label>
+                <input type="date" class="form-control form-control-sm" id="endDate">
+            </div>
+            <div class="col-auto">
+                <label class="form-label small mb-0">設備名稱</label>
+                <input type="text" class="form-control form-control-sm" id="deviceFilter" placeholder="全部">
+            </div>
+            <div class="col-auto">
+                <label class="form-label small mb-0">筆數</label>
+                <select class="form-select form-select-sm" id="limitSelect">
+                    <option value="100">100</option>
+                    <option value="500" selected>500</option>
+                    <option value="1000">1000</option>
+                    <option value="5000">5000</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-primary btn-sm">
+                    <i class="bi bi-search"></i> 查詢
+                </button>
+                <a id="exportLink" href="#" class="btn btn-outline-secondary btn-sm" onclick="exportCsv()">
+                    <i class="bi bi-download"></i> 匯出 CSV
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 結果 -->
+<div class="card">
+    <div class="card-header d-flex justify-content-between">
+        <span>查詢結果</span>
+        <span id="resultCount" class="text-muted small"></span>
+    </div>
+    <div class="table-responsive" style="max-height: 70vh; overflow-y: auto;">
+        <table class="table table-hover table-sm mb-0">
+            <thead class="table-light sticky-top">
+                <tr>
+                    <th>時間</th>
+                    <th>Server</th>
+                    <th>設備</th>
+                    <th>數值</th>
+                    <th>閾值</th>
+                    <th>條件</th>
+                    <th>累積</th>
+                    <th>異常</th>
+                    <th>類型</th>
+                    <th>診斷</th>
+                </tr>
+            </thead>
+            <tbody id="historyBody">
+                <tr><td colspan="10" class="text-center text-muted">請按查詢</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 預設日期為今天
+document.getElementById('endDate').value = new Date().toISOString().split('T')[0];
+
+function loadHistory() {
+    const params = new URLSearchParams({
+        start_date: document.getElementById('startDate').value,
+        end_date: document.getElementById('endDate').value,
+        device_name: document.getElementById('deviceFilter').value,
+        limit: document.getElementById('limitSelect').value,
+    });
+
+    fetch('/api/history?' + params)
+        .then(r => r.json())
+        .then(data => {
+            const rows = data.data || [];
+            document.getElementById('resultCount').textContent = rows.length + ' 筆';
+
+            if (rows.length === 0) {
+                document.getElementById('historyBody').innerHTML =
+                    '<tr><td colspan="10" class="text-center text-muted">無資料</td></tr>';
+                return;
+            }
+
+            let html = '';
+            for (const r of rows) {
+                const alertClass = r.is_alert ? 'table-danger' : '';
+                const alertIcon = r.is_alert
+                    ? '<i class="bi bi-exclamation-triangle-fill text-danger"></i>'
+                    : '<i class="bi bi-check-circle text-success"></i>';
+                html += `
+                    <tr class="${alertClass}">
+                        <td class="text-nowrap small">${r.timestamp}</td>
+                        <td>${r.server_name || ''}</td>
+                        <td>${r.device_name}</td>
+                        <td>${r.value ?? '-'}</td>
+                        <td>${r.threshold ?? '-'}</td>
+                        <td>${r.condition || '-'}</td>
+                        <td>${r.counter}</td>
+                        <td class="text-center">${alertIcon}</td>
+                        <td><span class="badge bg-secondary">${r.alert_type || ''}</span></td>
+                        <td class="small">${r.diagnostic || '-'}</td>
+                    </tr>`;
+            }
+            document.getElementById('historyBody').innerHTML = html;
+        })
+        .catch(err => {
+            console.error(err);
+            document.getElementById('historyBody').innerHTML =
+                '<tr><td colspan="10" class="text-center text-danger">查詢失敗</td></tr>';
+        });
+}
+
+function exportCsv() {
+    const params = new URLSearchParams({
+        start_date: document.getElementById('startDate').value,
+        end_date: document.getElementById('endDate').value,
+    });
+    window.open('/api/history/export?' + params, '_blank');
+}
+</script>
+{% endblock %}

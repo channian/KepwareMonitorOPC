@@ -3,6 +3,8 @@ import os
 import json
 import csv
 import logging
+import hashlib
+import secrets
 from datetime import datetime
 
 
@@ -11,6 +13,8 @@ class DatabaseService:
     SQLite 資料庫服務：
       - monitor_history: 監控歷史紀錄
       - alert_log: 派報紀錄
+      - users: 使用者帳號
+      - webhook_log: Webhook 推播紀錄
     """
 
     def __init__(self, db_path="data/monitor.db"):
@@ -56,17 +60,204 @@ class DatabaseService:
                     is_recovery INTEGER DEFAULT 0
                 );
 
+                CREATE TABLE IF NOT EXISTS users (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username    TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    salt        TEXT NOT NULL,
+                    role        TEXT NOT NULL DEFAULT 'viewer',
+                    display_name TEXT,
+                    created_at  TEXT NOT NULL,
+                    last_login  TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS webhook_log (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp   TEXT NOT NULL,
+                    server_name TEXT,
+                    device_name TEXT,
+                    url         TEXT,
+                    request_body TEXT,
+                    response_code INTEGER,
+                    response_body TEXT,
+                    is_success  INTEGER DEFAULT 0,
+                    is_recovery INTEGER DEFAULT 0
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_history_ts
                     ON monitor_history(timestamp);
                 CREATE INDEX IF NOT EXISTS idx_history_device
                     ON monitor_history(device_name);
                 CREATE INDEX IF NOT EXISTS idx_alert_ts
                     ON alert_log(timestamp);
+                CREATE INDEX IF NOT EXISTS idx_webhook_ts
+                    ON webhook_log(timestamp);
             """)
             conn.commit()
+
+            # 建立預設 admin 帳號（若不存在）
+            self._ensure_default_admin(conn)
         finally:
             conn.close()
         logging.info(f"SQLite 資料庫初始化完成: {self.db_path}")
+
+    # ===========================================
+    # 密碼工具
+    # ===========================================
+
+    @staticmethod
+    def _hash_password(password, salt=None):
+        """使用 SHA-256 + salt 雜湊密碼"""
+        if salt is None:
+            salt = secrets.token_hex(16)
+        hashed = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+        return hashed, salt
+
+    def _ensure_default_admin(self, conn):
+        """確保預設 admin 帳號存在"""
+        row = conn.execute(
+            "SELECT id FROM users WHERE username = ?", ("admin",)
+        ).fetchone()
+        if row is None:
+            pw_hash, salt = self._hash_password("admin")
+            conn.execute(
+                """INSERT INTO users (username, password_hash, salt, role, display_name, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                ("admin", pw_hash, salt, "admin", "Administrator",
+                 datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            )
+            conn.commit()
+            logging.info("已建立預設管理員帳號: admin / admin（請儘速修改密碼）")
+
+    # ===========================================
+    # 使用者管理
+    # ===========================================
+
+    def authenticate_user(self, username, password):
+        """驗證帳密，成功回傳 user dict，失敗回傳 None"""
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                "SELECT * FROM users WHERE username = ?", (username,)
+            ).fetchone()
+            if row is None:
+                return None
+            pw_hash, _ = self._hash_password(password, row["salt"])
+            if pw_hash != row["password_hash"]:
+                return None
+            # 更新最後登入時間
+            conn.execute(
+                "UPDATE users SET last_login = ? WHERE id = ?",
+                (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), row["id"]),
+            )
+            conn.commit()
+            return dict(row)
+        finally:
+            conn.close()
+
+    def get_all_users(self):
+        """取得所有使用者（不含密碼）"""
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
+                "SELECT id, username, role, display_name, created_at, last_login FROM users ORDER BY id"
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def create_user(self, username, password, role="viewer", display_name=""):
+        """建立使用者"""
+        conn = self._get_conn()
+        try:
+            pw_hash, salt = self._hash_password(password)
+            conn.execute(
+                """INSERT INTO users (username, password_hash, salt, role, display_name, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (username, pw_hash, salt, role, display_name or username,
+                 datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            )
+            conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+        finally:
+            conn.close()
+
+    def update_user(self, user_id, role=None, display_name=None, password=None):
+        """更新使用者資訊"""
+        conn = self._get_conn()
+        try:
+            if password:
+                pw_hash, salt = self._hash_password(password)
+                conn.execute(
+                    "UPDATE users SET password_hash = ?, salt = ? WHERE id = ?",
+                    (pw_hash, salt, user_id),
+                )
+            if role is not None:
+                conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
+            if display_name is not None:
+                conn.execute("UPDATE users SET display_name = ? WHERE id = ?", (display_name, user_id))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    def delete_user(self, user_id):
+        """刪除使用者"""
+        conn = self._get_conn()
+        try:
+            conn.execute("DELETE FROM users WHERE id = ? AND username != 'admin'", (user_id,))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    # ===========================================
+    # Webhook 紀錄
+    # ===========================================
+
+    def write_webhook_log(self, server_name, device_name, url,
+                          request_body, response_code, response_body,
+                          is_success, is_recovery=False):
+        """寫入 Webhook 推播紀錄"""
+        conn = self._get_conn()
+        try:
+            conn.execute(
+                """INSERT INTO webhook_log
+                   (timestamp, server_name, device_name, url,
+                    request_body, response_code, response_body,
+                    is_success, is_recovery)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    server_name, device_name, url,
+                    request_body, response_code, response_body,
+                    int(is_success), int(is_recovery),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def query_webhook_logs(self, start_date=None, end_date=None, limit=200):
+        """查詢 Webhook 推播紀錄"""
+        conn = self._get_conn()
+        try:
+            sql = "SELECT * FROM webhook_log WHERE 1=1"
+            params = []
+            if start_date:
+                sql += " AND timestamp >= ?"
+                params.append(start_date)
+            if end_date:
+                sql += " AND timestamp <= ?"
+                params.append(end_date + " 23:59:59")
+            sql += " ORDER BY timestamp DESC LIMIT ?"
+            params.append(limit)
+            rows = conn.execute(sql, params).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
 
     def write_history(self, server_name, device_name, nodeid, value,
                       threshold, condition, counter, is_alert,
@@ -198,10 +389,15 @@ class DatabaseService:
                 DELETE FROM alert_log
                 WHERE julianday(?) - julianday(timestamp) > ?
             """
+            sql_webhook = """
+                DELETE FROM webhook_log
+                WHERE julianday(?) - julianday(timestamp) > ?
+            """
             cur1 = conn.execute(sql_history, (cutoff, days))
             cur2 = conn.execute(sql_alerts, (cutoff, days))
+            cur3 = conn.execute(sql_webhook, (cutoff, days))
             conn.commit()
-            total = cur1.rowcount + cur2.rowcount
+            total = cur1.rowcount + cur2.rowcount + cur3.rowcount
             if total > 0:
                 logging.info(f"清理舊紀錄: 刪除 {total} 筆 (超過 {days} 天)")
             return total
