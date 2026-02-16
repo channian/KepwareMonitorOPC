@@ -113,7 +113,7 @@ class MonitorManager:
         self.devices = []  # list of DeviceConfig
 
         # 背景執行緒池（用於寄信、Webhook 等阻塞操作，避免卡住 event loop）
-        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
         logging.info(f"MonitorManager 設定: 檢查間隔={self.check_interval}s, "
                      f"CSV={self.tags_csv}, Server 數={len(self.connections)}")

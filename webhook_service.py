@@ -1,3 +1,4 @@
+import json
 import re
 import logging
 from datetime import datetime
@@ -67,18 +68,39 @@ class WebhookService:
         is_success = False
 
         try:
-            headers = {"Content-Type": "application/json; charset=utf-8"}
+            # 將模板渲染結果解析為 dict，用 json= 傳送（與 requests.post(json=...) 一致）
+            try:
+                post_data = json.loads(body_str)
+            except json.JSONDecodeError as je:
+                logging.warning(f"Webhook Body 模板解析失敗（非合法 JSON）: {je}")
+                logging.warning(f"Body 內容: {body_str[:200]}")
+                post_data = None
+
+            headers = {}
             if self.token:
                 headers["Authorization"] = f"Bearer {self.token}"
 
-            resp = requests.post(
-                self.url,
-                data=body_str.encode("utf-8"),
-                headers=headers,
-                verify=self.verify_ssl,
-                proxies=self.proxies,
-                timeout=self.timeout,
-            )
+            if post_data is not None:
+                # 用 json= 參數（自動設定 Content-Type: application/json）
+                resp = requests.post(
+                    self.url,
+                    json=post_data,
+                    headers=headers,
+                    verify=self.verify_ssl,
+                    proxies=self.proxies,
+                    timeout=self.timeout,
+                )
+            else:
+                # fallback: 直接傳 raw string
+                headers["Content-Type"] = "application/json; charset=utf-8"
+                resp = requests.post(
+                    self.url,
+                    data=body_str.encode("utf-8"),
+                    headers=headers,
+                    verify=self.verify_ssl,
+                    proxies=self.proxies,
+                    timeout=self.timeout,
+                )
 
             response_code = resp.status_code
             response_body = resp.text[:500]
