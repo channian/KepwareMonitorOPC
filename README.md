@@ -180,6 +180,34 @@ Port = 8080
 | Layer 2 | TCP 連線 OPC Port | OPC 服務未回應 |
 | Layer 3 | Ping 設備 IP / TCP Port | 設備無法連線 / IGS 服務未回應 |
 
+## 自訂通知內容
+
+### Email 信件
+
+信件的 HTML 內容定義在 `monitor_manager.py` 的 `send_device_alert` 方法中：
+
+- **主旨**（約第 401 行）：`subject = f"{status_tag} {self.mail_subject} - {device.name}"`
+- **HTML 本文**（約第 402~417 行）：`html_body = f"""..."""`
+
+可在 f-string 中使用的變數：`device.name`、`device.server_name`、`device.condition`、`device.threshold`、`device.counter`、`device.accumulate`、`value`、`color_hex`、`title_text`、`diag_html`
+
+### Webhook 推播
+
+1. **BodyTemplate**（`settings.ini`，不需改程式）：透過 `[Webhook]` 的 `BodyTemplate` 組合變數，可用變數見上方「BodyTemplate 可用變數」表格
+2. **message 變數內容**（需改程式）：定義在 `webhook_service.py` 的 `build_variables` 方法（約第 169~176 行）
+
+### 三層診斷訊息
+
+診斷訊息定義在 `diagnostic_service.py` 的以下位置：
+
+| 行號 | 訊息 | 說明 |
+|------|------|------|
+| 141 | `iFIX/IGS 機台 {ip} 無法連線 (Ping 失敗，可能已關機)` | 設備 Ping 失敗 |
+| 151 | `iFIX/IGS 機台 {ip} 正常但 IGS 服務 (Port {port}) 無回應` | 設備 Port 不通 |
+| 157 | `iFIX/IGS 機台 {ip} 與 IGS 服務正常` | 設備正常 |
+
+將 `iFIX/IGS 機台`、`IGS 服務` 替換為你實際的設備名稱即可。
+
 ## License
 
 MIT
