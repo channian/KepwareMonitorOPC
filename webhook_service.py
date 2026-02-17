@@ -14,8 +14,8 @@ class WebhookService:
     """
     Webhook 推播服務：
       - 異常 / 復歸時呼叫外部 API（公司內部通訊軟體等）
-      - 支援 {{$變數}} 模板替換
-      - POST JSON + Bearer Token 認證
+      - 支援 {{$variable}} 模板替換（variable 可含底線，如 {{$_message}}）
+      - Token 放在 Body 中（由 BodyTemplate 控制）
       - 支援 Proxy 繞過（公司內網 API 直連）
     """
 
@@ -48,11 +48,15 @@ class WebhookService:
         if not self.enable or not self.url:
             return
 
+        # 加入 token 作為模板變數，讓 BodyTemplate 可以用 {{$token}}
+        variables = dict(variables)
+        variables["token"] = self.token
+
         # 診斷：記錄模板和變數
         logging.debug(f"Webhook 模板原始值: {self.body_template}")
         logging.debug(f"Webhook 變數 keys: {list(variables.keys())}")
 
-        # 替換模板變數 {{$variable}}
+        # 替換模板變數 {{$variable}} 或 {{$_variable}}
         body_str = self._render_template(self.body_template, variables)
         raw_body = body_str  # 預設值，後面可能被覆寫
 
@@ -75,11 +79,8 @@ class WebhookService:
             headers = {
                 "Content-Type": "application/json; charset=utf-8",
             }
-            if self.token:
-                headers["Authorization"] = f"Bearer {self.token}"
 
             # 用 data= + ensure_ascii=False 傳送原生 UTF-8
-            # （某些 API 不接受 \uXXXX unicode escape，必須用原生中文）
             if post_data is not None:
                 raw_body = json.dumps(post_data, ensure_ascii=False)
             else:
@@ -87,7 +88,6 @@ class WebhookService:
 
             # 診斷 log：顯示實際送出的內容
             logging.info(f"Webhook 送出 → URL: {self.url}")
-            logging.info(f"Webhook 送出 → Headers: {headers}")
             logging.info(f"Webhook 送出 → Body: {raw_body[:500]}")
 
             resp = requests.post(
@@ -103,8 +103,25 @@ class WebhookService:
             response_body = resp.text[:500]
             is_success = 200 <= response_code < 300
 
-            # 詳細 log：無論成功失敗都記錄 response
-            logging.info(
+            # 檢查 API 回應內容是否真正成功
+            # 某些 API 回 HTTP 200 但 body 中 status=false 表示失敗
+            if is_success and response_body:
+                try:
+                    resp_json = resp.json()
+                    if isinstance(resp_json, dict):
+                        api_status = resp_json.get("status")
+                        if api_status is False or api_status == "false":
+                            is_success = False
+                            logging.warning(
+                                f"Webhook API 回應失敗: {device_name} "
+                                f"HTTP {response_code} | {response_body[:200]}"
+                            )
+                except (ValueError, KeyError):
+                    pass
+
+            # 詳細 log
+            log_fn = logging.info if is_success else logging.warning
+            log_fn(
                 f"Webhook 回應 ← {device_name} "
                 f"HTTP {response_code} | Body: {response_body[:200]}"
             )
@@ -143,8 +160,8 @@ class WebhookService:
     @staticmethod
     def _render_template(template, variables):
         """
-        將模板中的 {{$variable}} 替換為實際值。
-        例如: '{"content": "{{$message}}"}' → '{"content": "設備異常通知"}'
+        將模板中的 {{$variable}} 或 {{$_variable}} 替換為實際值。
+        支援變數名稱含底線，如 {{$_user_name}} 或 {{$token}}。
         """
         def replacer(match):
             var_name = match.group(1)
@@ -155,7 +172,8 @@ class WebhookService:
             escaped = escaped.replace("\t", "\\t")
             return escaped
 
-        return re.sub(r"\{\{\$(\w+)\}\}", replacer, template)
+        # 匹配 {{$name}} 或 {{$_name}}，變數名可含底線
+        return re.sub(r"\{\{\$(_?\w+)\}\}", replacer, template)
 
     def build_variables(self, server_name, device_name, value, threshold,
                         condition, counter, accumulate, diagnostic_msg,
@@ -204,6 +222,9 @@ class WebhookService:
             diagnostic_msg="這是一則測試推播",
             is_recovery=False,
         )
+        # 加入 token 變數
+        variables["token"] = self.token
+
         body_str = self._render_template(self.body_template, variables)
 
         try:
@@ -214,8 +235,6 @@ class WebhookService:
         headers = {
             "Content-Type": "application/json; charset=utf-8",
         }
-        if self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
 
         raw_body = json.dumps(post_data, ensure_ascii=False)
 
@@ -240,7 +259,17 @@ class WebhookService:
             detail_lines.append(f"HTTP {resp.status_code}")
             detail_lines.append(f"Response Headers: {dict(resp.headers)}")
             detail_lines.append(f"Response Body: {resp.text[:500]}")
+
             ok = 200 <= resp.status_code < 300
+            # 檢查 API body 中的 status
+            if ok:
+                try:
+                    resp_json = resp.json()
+                    if isinstance(resp_json, dict) and resp_json.get("status") is False:
+                        ok = False
+                except (ValueError, KeyError):
+                    pass
+
             return ok, "\n".join(detail_lines)
 
         except Exception as ex:
