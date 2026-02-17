@@ -48,9 +48,15 @@ class WebhookService:
         if not self.enable or not self.url:
             return
 
+        # 診斷：記錄模板和變數
+        logging.debug(f"Webhook 模板原始值: {self.body_template}")
+        logging.debug(f"Webhook 變數 keys: {list(variables.keys())}")
+
         # 替換模板變數 {{$variable}}
         body_str = self._render_template(self.body_template, variables)
         raw_body = body_str  # 預設值，後面可能被覆寫
+
+        logging.debug(f"Webhook 模板渲染後: {body_str[:300]}")
 
         # 發送 HTTP POST
         response_code = 0

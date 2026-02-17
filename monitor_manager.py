@@ -122,8 +122,8 @@ class MonitorManager:
             logging.info("Webhook 推播未啟用")
             return None
 
-        url = self.config.get("Webhook", "Url", fallback="").strip()
-        token = self.config.get("Webhook", "Token", fallback="").strip()
+        url = self.config.get("Webhook", "Url", fallback="").strip().strip('"').strip("'")
+        token = self.config.get("Webhook", "Token", fallback="").strip().strip('"').strip("'")
         body_template = self.config.get("Webhook", "BodyTemplate", fallback="").strip()
         timeout = self.config.getint("Webhook", "Timeout", fallback=10)
         verify_ssl = self.config.getboolean("Webhook", "VerifySSL", fallback=False)
@@ -134,7 +134,10 @@ class MonitorManager:
             logging.warning("Webhook 設定不完整（缺少 Url 或 BodyTemplate），已停用")
             return None
 
+        # 診斷：顯示讀取到的原始值，方便確認模板是否正確
         logging.info(f"Webhook 推播已啟用: {url}")
+        logging.info(f"Webhook BodyTemplate: {body_template}")
+
         return WebhookService(
             url=url, token=token, body_template=body_template,
             enable=True, timeout=timeout,
