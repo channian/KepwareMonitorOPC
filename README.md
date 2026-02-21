@@ -218,6 +218,49 @@ Port = 8080
 
 將 `iFIX/IGS 機台`、`IGS 服務` 替換為你實際的設備名稱即可。
 
+## 規劃中功能（待 Kepware API 服務站台上線）
+
+本專案預計透過獨立的 Kepware API 服務站台間接存取 Kepware Configuration API，不直接連線 Kepware 主機。
+
+### 架構
+
+```
+Kepware Server A / B
+    ↕
+Kepware API 服務站台（獨立專案）    ← 負責與 Kepware Config API 溝通
+    ↕  統一 REST API
+本專案（KepwareMonitorOPC）         ← 呼叫服務站台 API + Web UI 顯示
+```
+
+### 新增分頁
+
+| 分頁 | 功能 | 說明 |
+|------|------|------|
+| **Kepware 事件** | Event Log 瀏覽、Channel 錯誤統計、Tag 錯誤 Top 10 | 累積達門檻自動派報 |
+| **Kepware 管理** | 服務狀態監控、Channel 啟用/停用、設備設定管理 | 免連線 Kepware 主機即可操作 |
+
+### 派報邏輯
+
+| 事件類型 | 條件 | 動作 |
+|---------|------|------|
+| Channel 錯誤 | 1 小時內累積 ≥ 5 次 | Email + Webhook |
+| 服務層級事件（Runtime stopped 等） | 出現 1 次 | 立即 Email + Webhook |
+| Tag 錯誤 | 不限 | 僅記錄，Web UI 可查 |
+
+### 預計設定
+
+```ini
+[KepwareLog]
+Enable = false
+ApiBaseUrl = http://your-api-service/api/kepware
+PollInterval = 600
+ChannelAlertWindow = 3600
+ChannelAlertThreshold = 5
+CriticalKeywords = Runtime stopped,License error,Server shutdown
+```
+
+> 特定 Tag 若需要派報，可透過現有 `tags.csv` 的 OPC 監控機制處理，不需在此重複設定。
+
 ## License
 
 MIT
