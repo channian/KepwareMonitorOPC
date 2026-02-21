@@ -182,6 +182,16 @@ Port = 8080
 
 ## 自訂通知內容
 
+### 修改位置總覽
+
+| 要改什麼 | 檔案 | 位置 | 需改程式 |
+|---------|------|------|---------|
+| Email 主旨 | `monitor_manager.py` | 約第 401 行 | 是 |
+| Email HTML 內容 | `monitor_manager.py` | 約第 402~417 行 | 是 |
+| Webhook Body 結構 | `Config/settings.ini` | `[Webhook]` BodyTemplate | 否 |
+| Webhook `{{$message}}` 格式 | `webhook_service.py` | `build_variables` 方法，約第 169~176 行 | 是 |
+| 三層診斷訊息 | `diagnostic_service.py` | 第 141、151、157 行 | 是 |
+
 ### Email 信件
 
 信件的 HTML 內容定義在 `monitor_manager.py` 的 `send_device_alert` 方法中：
