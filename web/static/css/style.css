@@ -2,7 +2,6 @@
 
 body {
     font-size: 0.9rem;
-    background-color: #f8f9fa;
 }
 
 .navbar-brand {
@@ -11,11 +10,9 @@ body {
 
 .card {
     box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-    border: 1px solid #e0e0e0;
 }
 
 .card-header {
-    background-color: #f8f9fa;
     font-weight: 600;
     font-size: 0.9rem;
     padding: 0.5rem 1rem;
@@ -56,23 +53,4 @@ body {
 /* Alert transition */
 .alert {
     transition: opacity 0.3s ease;
-}
-
-/* Dark mode overrides */
-[data-bs-theme="dark"] body {
-    background-color: #1a1d21;
-}
-
-[data-bs-theme="dark"] .card {
-    border-color: #3a3f44;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-}
-
-[data-bs-theme="dark"] .card-header {
-    background-color: #23272b;
-}
-
-[data-bs-theme="dark"] .table-light {
-    --bs-table-bg: #23272b;
-    --bs-table-color: #dee2e6;
 }

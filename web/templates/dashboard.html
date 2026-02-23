@@ -55,8 +55,20 @@
 <!-- 設備列表 -->
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <span>監控設備</span>
-        <div>
+        <div class="d-flex align-items-center gap-2">
+            <span>監控設備</span>
+            <span class="text-muted small" id="devicePageInfo"></span>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <div class="input-group input-group-sm" style="width:250px;">
+                <span class="input-group-text"><i class="bi bi-search"></i></span>
+                <input type="text" class="form-control" id="deviceSearch" placeholder="搜尋名稱 / Server ..."
+                       oninput="onDeviceSearch()">
+                <button class="btn btn-outline-secondary" type="button"
+                        onclick="document.getElementById('deviceSearch').value='';onDeviceSearch();">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
             <button class="btn btn-sm btn-outline-secondary" onclick="filterDevices('all')">全部</button>
             <button class="btn btn-sm btn-outline-danger" onclick="filterDevices('alert')">異常</button>
             <button class="btn btn-sm btn-outline-success" onclick="filterDevices('normal')">正常</button>
@@ -84,20 +96,30 @@
         </table>
     </div>
 </div>
+
+<!-- 分頁 -->
+<div class="d-flex justify-content-end mt-2">
+    <nav>
+        <ul class="pagination pagination-sm mb-0" id="devicePagination"></ul>
+    </nav>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-let allDevices = [];
-let currentFilter = 'all';
+var allDevices = [];
+var currentFilter = 'all';
+var deviceSearchKw = '';
+var devicePage = 1;
+var devicePageSize = 50;
 
 // 初始載入
 fetchStatus();
 
 // SSE 即時更新
-const evtSource = new EventSource('/api/dashboard/sse');
+var evtSource = new EventSource('/api/dashboard/sse');
 evtSource.onmessage = function(event) {
-    const data = JSON.parse(event.data);
+    var data = JSON.parse(event.data);
     updateDashboard(data);
     document.getElementById('sseStatus').className = 'badge bg-success';
     document.getElementById('sseStatus').textContent = '即時連線';
@@ -109,9 +131,9 @@ evtSource.onerror = function() {
 
 function fetchStatus() {
     fetch('/api/dashboard/status')
-        .then(r => r.json())
-        .then(data => updateDashboard(data))
-        .catch(err => console.error('Failed to fetch status:', err));
+        .then(function(r) { return r.json(); })
+        .then(function(data) { updateDashboard(data); })
+        .catch(function(err) { console.error('Failed to fetch status:', err); });
 }
 
 function updateDashboard(data) {
@@ -119,22 +141,23 @@ function updateDashboard(data) {
     document.getElementById('lastUpdate').textContent = '最後更新: ' + data.timestamp;
 
     // 連線狀態卡片
-    const connDiv = document.getElementById('connectionCards');
-    let connHtml = '';
-    for (const [name, info] of Object.entries(data.connections || {})) {
-        const color = info.connected ? 'success' : 'danger';
-        const icon = info.connected ? 'bi-check-circle-fill' : 'bi-x-circle-fill';
-        const status = info.connected ? '已連線' : '斷線';
-        connHtml += `
-            <div class="col-auto">
-                <div class="card border-${color}">
-                    <div class="card-body py-2 px-3 d-flex align-items-center gap-2">
-                        <i class="bi ${icon} text-${color}"></i>
-                        <span class="fw-bold">${name}</span>
-                        <span class="badge bg-${color}">${status}</span>
-                    </div>
-                </div>
-            </div>`;
+    var connDiv = document.getElementById('connectionCards');
+    var connHtml = '';
+    for (var name in (data.connections || {})) {
+        var info = data.connections[name];
+        var color = info.connected ? 'success' : 'danger';
+        var icon = info.connected ? 'bi-check-circle-fill' : 'bi-x-circle-fill';
+        var status = info.connected ? '已連線' : '斷線';
+        connHtml +=
+            '<div class="col-auto">' +
+                '<div class="card border-' + color + '">' +
+                    '<div class="card-body py-2 px-3 d-flex align-items-center gap-2">' +
+                        '<i class="bi ' + icon + ' text-' + color + '"></i>' +
+                        '<span class="fw-bold">' + name + '</span>' +
+                        '<span class="badge bg-' + color + '">' + status + '</span>' +
+                    '</div>' +
+                '</div>' +
+            '</div>';
     }
     connDiv.innerHTML = connHtml;
 
@@ -142,10 +165,10 @@ function updateDashboard(data) {
     allDevices = data.devices || [];
 
     // 統計
-    const enabled = allDevices.filter(d => d.enable);
-    const alertDevices = enabled.filter(d => d.is_alert);
-    const normalDevices = enabled.filter(d => !d.is_alert);
-    const disabled = allDevices.filter(d => !d.enable);
+    var enabled = allDevices.filter(function(d) { return d.enable; });
+    var alertDevices = enabled.filter(function(d) { return d.is_alert; });
+    var normalDevices = enabled.filter(function(d) { return !d.is_alert; });
+    var disabled = allDevices.filter(function(d) { return !d.enable; });
 
     document.getElementById('totalDevices').textContent = allDevices.length;
     document.getElementById('normalCount').textContent = normalDevices.length;
@@ -155,28 +178,70 @@ function updateDashboard(data) {
     renderDeviceTable();
 }
 
+function getFilteredDevices() {
+    var list = allDevices;
+
+    // 狀態篩選
+    if (currentFilter === 'alert') {
+        list = list.filter(function(d) { return d.enable && d.is_alert; });
+    } else if (currentFilter === 'normal') {
+        list = list.filter(function(d) { return d.enable && !d.is_alert; });
+    }
+
+    // 搜尋
+    if (deviceSearchKw) {
+        var kw = deviceSearchKw.toLowerCase();
+        list = list.filter(function(d) {
+            return (d.name && d.name.toLowerCase().indexOf(kw) >= 0) ||
+                   (d.server_name && d.server_name.toLowerCase().indexOf(kw) >= 0) ||
+                   (d.diagnostic && d.diagnostic.toLowerCase().indexOf(kw) >= 0);
+        });
+    }
+
+    return list;
+}
+
 function filterDevices(filter) {
     currentFilter = filter;
+    devicePage = 1;
+    renderDeviceTable();
+}
+
+function onDeviceSearch() {
+    deviceSearchKw = document.getElementById('deviceSearch').value.trim();
+    devicePage = 1;
     renderDeviceTable();
 }
 
 function renderDeviceTable() {
-    let filtered = allDevices;
-    if (currentFilter === 'alert') {
-        filtered = allDevices.filter(d => d.enable && d.is_alert);
-    } else if (currentFilter === 'normal') {
-        filtered = allDevices.filter(d => d.enable && !d.is_alert);
+    var filtered = getFilteredDevices();
+    var totalPages = Math.max(1, Math.ceil(filtered.length / devicePageSize));
+    if (devicePage > totalPages) devicePage = totalPages;
+
+    var start = (devicePage - 1) * devicePageSize;
+    var pageItems = filtered.slice(start, start + devicePageSize);
+
+    // 頁面資訊
+    var info = document.getElementById('devicePageInfo');
+    if (deviceSearchKw) {
+        info.textContent = '(搜尋: ' + filtered.length + ' / ' + allDevices.length + ' 筆)';
+    } else if (currentFilter !== 'all') {
+        info.textContent = '(' + filtered.length + ' 筆)';
+    } else {
+        info.textContent = '';
     }
 
-    const tbody = document.getElementById('deviceTableBody');
-    if (filtered.length === 0) {
+    var tbody = document.getElementById('deviceTableBody');
+    if (pageItems.length === 0) {
         tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">無資料</td></tr>';
+        renderDevicePagination(totalPages);
         return;
     }
 
-    let html = '';
-    for (const d of filtered) {
-        let statusIcon, statusClass;
+    var html = '';
+    for (var idx = 0; idx < pageItems.length; idx++) {
+        var d = pageItems[idx];
+        var statusIcon, statusClass;
         if (!d.enable) {
             statusIcon = '<i class="bi bi-dash-circle text-secondary"></i>';
             statusClass = 'table-light text-muted';
@@ -188,19 +253,50 @@ function renderDeviceTable() {
             statusClass = '';
         }
 
-        html += `
-            <tr class="${statusClass}">
-                <td class="text-center">${statusIcon}</td>
-                <td>${d.name}</td>
-                <td>${d.server_name}</td>
-                <td><span class="badge bg-info">${d.device_type}</span></td>
-                <td>${d.condition || '-'}</td>
-                <td>${d.threshold || '-'}</td>
-                <td>${d.counter}/${d.accumulate}</td>
-                <td class="small">${d.diagnostic || '-'}</td>
-            </tr>`;
+        html +=
+            '<tr class="' + statusClass + '">' +
+                '<td class="text-center">' + statusIcon + '</td>' +
+                '<td>' + d.name + '</td>' +
+                '<td>' + d.server_name + '</td>' +
+                '<td><span class="badge bg-info">' + d.device_type + '</span></td>' +
+                '<td>' + (d.condition || '-') + '</td>' +
+                '<td>' + (d.threshold || '-') + '</td>' +
+                '<td>' + d.counter + '/' + d.accumulate + '</td>' +
+                '<td class="small">' + (d.diagnostic || '-') + '</td>' +
+            '</tr>';
     }
     tbody.innerHTML = html;
+    renderDevicePagination(totalPages);
+}
+
+function renderDevicePagination(totalPages) {
+    var ul = document.getElementById('devicePagination');
+    if (totalPages <= 1) { ul.innerHTML = ''; return; }
+
+    var html = '';
+    html += '<li class="page-item ' + (devicePage === 1 ? 'disabled' : '') + '">' +
+        '<a class="page-link" href="#" onclick="goDevicePage(' + (devicePage - 1) + ');return false;">&laquo;</a></li>';
+
+    var startP = Math.max(1, devicePage - 2);
+    var endP = Math.min(totalPages, startP + 4);
+    if (endP - startP < 4) startP = Math.max(1, endP - 4);
+
+    for (var p = startP; p <= endP; p++) {
+        html += '<li class="page-item ' + (p === devicePage ? 'active' : '') + '">' +
+            '<a class="page-link" href="#" onclick="goDevicePage(' + p + ');return false;">' + p + '</a></li>';
+    }
+
+    html += '<li class="page-item ' + (devicePage === totalPages ? 'disabled' : '') + '">' +
+        '<a class="page-link" href="#" onclick="goDevicePage(' + (devicePage + 1) + ');return false;">&raquo;</a></li>';
+    ul.innerHTML = html;
+}
+
+function goDevicePage(p) {
+    var filtered = getFilteredDevices();
+    var totalPages = Math.max(1, Math.ceil(filtered.length / devicePageSize));
+    if (p < 1 || p > totalPages) return;
+    devicePage = p;
+    renderDeviceTable();
 }
 </script>
 {% endblock %}

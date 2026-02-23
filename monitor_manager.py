@@ -328,6 +328,13 @@ class MonitorManager:
             except Exception:
                 logging.warning(f"[{device.name}] 數值解析失敗: {raw_value}")
                 return False, None
+            # unchanged 不需要 threshold，優先判斷
+            if condition == "unchanged":
+                if val == 0:
+                    return True, val
+                if device.last_value is None:
+                    return False, val
+                return (val == device.last_value), val
             if threshold is None:
                 return False, val
             if condition == "greater":
@@ -338,12 +345,6 @@ class MonitorManager:
                 return (val == threshold), val
             if condition in ("not_equal", "!="):
                 return (val != threshold), val
-            if condition == "unchanged":
-                if val == 0:
-                    return True, val
-                if device.last_value is None:
-                    return False, val
-                return (val == device.last_value), val
             return False, val
 
         if dtype == "bool":
@@ -360,6 +361,11 @@ class MonitorManager:
                         val = bool(int(raw_value))
                     except Exception:
                         val = False
+            # unchanged 不需要 threshold，優先判斷
+            if condition == "unchanged":
+                if device.last_value is None:
+                    return False, val
+                return (val == device.last_value), val
             if threshold is None:
                 return False, val
             if condition in ("true", "1"):
@@ -370,10 +376,6 @@ class MonitorManager:
                 return (val == threshold), val
             if condition in ("not_equal", "!="):
                 return (val != threshold), val
-            if condition == "unchanged":
-                if device.last_value is None:
-                    return False, val
-                return (val == device.last_value), val
             return False, val
 
         return False, None

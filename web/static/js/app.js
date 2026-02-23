@@ -1,22 +1,21 @@
 // Kepware Monitor Web UI - Shared JS
 
 /**
- * 深/淺色模式切換
+ * 深/淺色模式切換按鈕
  */
 (function () {
-    // 立即套用已儲存的主題
-    var saved = localStorage.getItem('theme') || 'light';
-    document.documentElement.setAttribute('data-bs-theme', saved);
-
-    function initTheme() {
+    function setup() {
+        // 初始化圖示
+        var theme = document.documentElement.getAttribute('data-bs-theme') || 'light';
         var icon = document.getElementById('themeIcon');
-        if (icon) icon.className = saved === 'dark' ? 'bi bi-sun-fill' : 'bi bi-moon-fill';
+        if (icon) icon.className = theme === 'dark' ? 'bi bi-sun-fill' : 'bi bi-moon-fill';
 
+        // 綁定按鈕
         var btn = document.getElementById('themeToggle');
         if (btn) {
             btn.addEventListener('click', function () {
-                var current = document.documentElement.getAttribute('data-bs-theme');
-                var next = current === 'dark' ? 'light' : 'dark';
+                var cur = document.documentElement.getAttribute('data-bs-theme') || 'light';
+                var next = cur === 'dark' ? 'light' : 'dark';
                 document.documentElement.setAttribute('data-bs-theme', next);
                 localStorage.setItem('theme', next);
                 var ic = document.getElementById('themeIcon');
@@ -25,11 +24,10 @@
         }
     }
 
-    // 相容：script 在 body 底部載入時 DOMContentLoaded 可能已觸發
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initTheme);
+        document.addEventListener('DOMContentLoaded', setup);
     } else {
-        initTheme();
+        setup();
     }
 })();
 
@@ -37,22 +35,22 @@
  * 修改密碼（base.html 的 modal 使用）
  */
 function changePassword() {
-    const oldPw = document.getElementById('oldPassword').value;
-    const newPw = document.getElementById('newPassword').value;
-    const confirmPw = document.getElementById('confirmPassword').value;
-    const alert = document.getElementById('changePwAlert');
+    var oldPw = document.getElementById('oldPassword').value;
+    var newPw = document.getElementById('newPassword').value;
+    var confirmPw = document.getElementById('confirmPassword').value;
+    var alertEl = document.getElementById('changePwAlert');
 
     if (!oldPw || !newPw) {
-        alert.className = 'alert alert-danger';
-        alert.textContent = '請填寫所有欄位';
-        alert.classList.remove('d-none');
+        alertEl.className = 'alert alert-danger';
+        alertEl.textContent = '請填寫所有欄位';
+        alertEl.classList.remove('d-none');
         return;
     }
 
     if (newPw !== confirmPw) {
-        alert.className = 'alert alert-danger';
-        alert.textContent = '新密碼與確認密碼不一致';
-        alert.classList.remove('d-none');
+        alertEl.className = 'alert alert-danger';
+        alertEl.textContent = '新密碼與確認密碼不一致';
+        alertEl.classList.remove('d-none');
         return;
     }
 
@@ -61,28 +59,28 @@ function changePassword() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ old_password: oldPw, new_password: newPw }),
     })
-    .then(r => r.json())
-    .then(data => {
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
         if (data.ok) {
-            alert.className = 'alert alert-success';
-            alert.textContent = '密碼修改成功';
-            alert.classList.remove('d-none');
-            setTimeout(() => {
+            alertEl.className = 'alert alert-success';
+            alertEl.textContent = '密碼修改成功';
+            alertEl.classList.remove('d-none');
+            setTimeout(function() {
                 bootstrap.Modal.getInstance(document.getElementById('changePwModal')).hide();
                 document.getElementById('oldPassword').value = '';
                 document.getElementById('newPassword').value = '';
                 document.getElementById('confirmPassword').value = '';
-                alert.classList.add('d-none');
+                alertEl.classList.add('d-none');
             }, 1500);
         } else {
-            alert.className = 'alert alert-danger';
-            alert.textContent = data.error || '修改失敗';
-            alert.classList.remove('d-none');
+            alertEl.className = 'alert alert-danger';
+            alertEl.textContent = data.error || '修改失敗';
+            alertEl.classList.remove('d-none');
         }
     })
-    .catch(err => {
-        alert.className = 'alert alert-danger';
-        alert.textContent = '請求失敗: ' + err;
-        alert.classList.remove('d-none');
+    .catch(function(err) {
+        alertEl.className = 'alert alert-danger';
+        alertEl.textContent = '請求失敗: ' + err;
+        alertEl.classList.remove('d-none');
     });
 }
