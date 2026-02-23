@@ -4,22 +4,34 @@
  * 深/淺色模式切換
  */
 (function () {
-    const saved = localStorage.getItem('theme') || 'light';
+    // 立即套用已儲存的主題
+    var saved = localStorage.getItem('theme') || 'light';
     document.documentElement.setAttribute('data-bs-theme', saved);
-    document.addEventListener('DOMContentLoaded', () => {
-        const icon = document.getElementById('themeIcon');
-        if (icon) icon.className = saved === 'dark' ? 'bi bi-sun-fill' : 'bi bi-moon-fill';
-    });
-})();
 
-function toggleTheme() {
-    const current = document.documentElement.getAttribute('data-bs-theme');
-    const next = current === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-bs-theme', next);
-    localStorage.setItem('theme', next);
-    const icon = document.getElementById('themeIcon');
-    if (icon) icon.className = next === 'dark' ? 'bi bi-sun-fill' : 'bi bi-moon-fill';
-}
+    function initTheme() {
+        var icon = document.getElementById('themeIcon');
+        if (icon) icon.className = saved === 'dark' ? 'bi bi-sun-fill' : 'bi bi-moon-fill';
+
+        var btn = document.getElementById('themeToggle');
+        if (btn) {
+            btn.addEventListener('click', function () {
+                var current = document.documentElement.getAttribute('data-bs-theme');
+                var next = current === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-bs-theme', next);
+                localStorage.setItem('theme', next);
+                var ic = document.getElementById('themeIcon');
+                if (ic) ic.className = next === 'dark' ? 'bi bi-sun-fill' : 'bi bi-moon-fill';
+            });
+        }
+    }
+
+    // 相容：script 在 body 底部載入時 DOMContentLoaded 可能已觸發
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initTheme);
+    } else {
+        initTheme();
+    }
+})();
 
 /**
  * 修改密碼（base.html 的 modal 使用）

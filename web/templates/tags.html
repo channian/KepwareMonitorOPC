@@ -24,6 +24,23 @@
 
 <div id="saveAlert" class="alert d-none mb-3"></div>
 
+<!-- 搜尋列 -->
+<div class="row mb-2">
+    <div class="col-md-4">
+        <div class="input-group input-group-sm">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="text" class="form-control" id="searchInput" placeholder="搜尋 Name / NodeId / Description ..."
+                   oninput="onSearch()">
+            <button class="btn btn-outline-secondary" type="button" onclick="document.getElementById('searchInput').value='';onSearch();">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+    </div>
+    <div class="col-md-8 d-flex align-items-center justify-content-end">
+        <span class="text-muted small" id="pageInfo"></span>
+    </div>
+</div>
+
 <div class="card">
     <div class="table-responsive">
         <table class="table table-hover table-sm mb-0" id="tagsTable">
@@ -39,8 +56,14 @@
     </div>
 </div>
 
-<div class="mt-2 text-muted small">
-    提示: 修改後請按「儲存」，CSV 會在下一次重載週期自動生效（無須重啟監控程式）
+<!-- 分頁列 -->
+<div class="d-flex justify-content-between align-items-center mt-2">
+    <div class="text-muted small">
+        提示: 修改後請按「儲存」，CSV 會在下一次重載週期自動生效（無須重啟監控程式）
+    </div>
+    <nav>
+        <ul class="pagination pagination-sm mb-0" id="pagination"></ul>
+    </nav>
 </div>
 {% endblock %}
 
@@ -48,6 +71,9 @@
 <script>
 let tagHeaders = [];
 let tagRows = [];
+let currentPage = 1;
+const pageSize = 50;
+let searchKeyword = '';
 
 loadTags();
 
@@ -57,8 +83,28 @@ function loadTags() {
         .then(data => {
             tagHeaders = data.headers || [];
             tagRows = data.rows || [];
+            currentPage = 1;
             renderTable();
         });
+}
+
+function getFilteredIndices() {
+    if (!searchKeyword) {
+        return tagRows.map((_, i) => i);
+    }
+    const kw = searchKeyword.toLowerCase();
+    const searchCols = ['Name', 'NodeId', 'Description', 'Server'];
+    const indices = [];
+    for (let i = 0; i < tagRows.length; i++) {
+        const row = tagRows[i];
+        for (const col of searchCols) {
+            if (row[col] && row[col].toLowerCase().includes(kw)) {
+                indices.push(i);
+                break;
+            }
+        }
+    }
+    return indices;
 }
 
 function renderTable() {
@@ -70,15 +116,31 @@ function renderTable() {
     }
     headerRow.innerHTML = hHtml;
 
+    const filtered = getFilteredIndices();
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    if (currentPage > totalPages) currentPage = totalPages;
+
+    const start = (currentPage - 1) * pageSize;
+    const pageIndices = filtered.slice(start, start + pageSize);
+
+    // Page info
+    const info = document.getElementById('pageInfo');
+    if (searchKeyword) {
+        info.textContent = `搜尋結果: ${filtered.length} / ${tagRows.length} 筆`;
+    } else {
+        info.textContent = `共 ${tagRows.length} 筆`;
+    }
+
     // Body
     const tbody = document.getElementById('tagsBody');
-    if (tagRows.length === 0) {
+    if (pageIndices.length === 0) {
         tbody.innerHTML = '<tr><td colspan="' + (tagHeaders.length + 1) + '" class="text-center text-muted">無資料</td></tr>';
+        renderPagination(totalPages);
         return;
     }
 
     let html = '';
-    for (let i = 0; i < tagRows.length; i++) {
+    for (const i of pageIndices) {
         html += '<tr>';
         html += `<td>
             <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="deleteRow(${i})" title="刪除">
@@ -95,6 +157,43 @@ function renderTable() {
         html += '</tr>';
     }
     tbody.innerHTML = html;
+    renderPagination(totalPages);
+}
+
+function renderPagination(totalPages) {
+    const ul = document.getElementById('pagination');
+    if (totalPages <= 1) { ul.innerHTML = ''; return; }
+
+    let html = '';
+    html += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+        <a class="page-link" href="#" onclick="goPage(${currentPage - 1});return false;">&laquo;</a></li>`;
+
+    let startP = Math.max(1, currentPage - 2);
+    let endP = Math.min(totalPages, startP + 4);
+    if (endP - startP < 4) startP = Math.max(1, endP - 4);
+
+    for (let p = startP; p <= endP; p++) {
+        html += `<li class="page-item ${p === currentPage ? 'active' : ''}">
+            <a class="page-link" href="#" onclick="goPage(${p});return false;">${p}</a></li>`;
+    }
+
+    html += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+        <a class="page-link" href="#" onclick="goPage(${currentPage + 1});return false;">&raquo;</a></li>`;
+    ul.innerHTML = html;
+}
+
+function goPage(p) {
+    const filtered = getFilteredIndices();
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    if (p < 1 || p > totalPages) return;
+    currentPage = p;
+    renderTable();
+}
+
+function onSearch() {
+    searchKeyword = document.getElementById('searchInput').value.trim();
+    currentPage = 1;
+    renderTable();
 }
 
 function updateCell(row, col, value) {
@@ -106,16 +205,20 @@ function addRow() {
     for (const h of tagHeaders) {
         newRow[h] = '';
     }
-    // 預設值
     newRow['Enable'] = 'TRUE';
     newRow['Type'] = 'number';
     newRow['CountNeeded'] = '1';
     tagRows.push(newRow);
+    // 跳到最後一頁
+    searchKeyword = '';
+    document.getElementById('searchInput').value = '';
+    const totalPages = Math.ceil(tagRows.length / pageSize);
+    currentPage = totalPages;
     renderTable();
 }
 
 function deleteRow(index) {
-    if (!confirm('確定要刪除此筆設備嗎?')) return;
+    if (!confirm('確定要刪除「' + (tagRows[index]['Name'] || '此筆') + '」嗎?')) return;
     tagRows.splice(index, 1);
     renderTable();
 }
@@ -153,6 +256,9 @@ function handleCsvUpload(input) {
         }
         tagHeaders = parsed.headers;
         tagRows = parsed.rows;
+        currentPage = 1;
+        searchKeyword = '';
+        document.getElementById('searchInput').value = '';
         renderTable();
         showAlert('saveAlert', 'warning',
             '已匯入 ' + parsed.rows.length + ' 筆資料（尚未儲存），請確認後按「儲存」');

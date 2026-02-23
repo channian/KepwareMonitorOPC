@@ -339,6 +339,8 @@ class MonitorManager:
             if condition in ("not_equal", "!="):
                 return (val != threshold), val
             if condition == "unchanged":
+                if val == 0:
+                    return True, val
                 if device.last_value is None:
                     return False, val
                 return (val == device.last_value), val
