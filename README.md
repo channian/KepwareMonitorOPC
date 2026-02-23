@@ -5,14 +5,14 @@
 ## 功能特色
 
 - **多台 Kepware Server** — 同時監控多台 OPC UA Server
-- **彈性閾值設定** — 支援數值比較（大於/小於/等於）、布林判斷、純記錄模式
+- **彈性閾值設定** — 支援數值比較（大於/小於/等於）、布林判斷、數值不變偵測、純記錄模式
 - **累積觸發機制** — 連續 N 次異常才派報，避免瞬間抖動誤報
 - **復歸通知** — 設備恢復正常時自動發送復歸通知
 - **三層式網路診斷** — Ping 主機、TCP Port 檢測、設備 IP 檢測，定位斷線層級
 - **Email 派報** — HTML 格式，支援全域/設備獨立收件人
 - **Webhook 推播** — 支援自訂 JSON Body 模板，Token 驗證，Proxy 設定
-- **Web UI 管理介面** — 即時儀表板（SSE）、歷史紀錄查詢匯出、設定管理、帳號管理
-- **CSV 熱載入** — 修改 tags.csv 後自動偵測並重新載入，無需重啟
+- **Web UI 管理介面** — 即時儀表板（SSE）、歷史紀錄查詢匯出、設定管理、帳號管理、深/淺色模式切換
+- **CSV 匯入/匯出** — Web UI 支援 CSV 整批上傳與下載，修改後自動偵測並重新載入，無需重啟
 - **OPC UA 安全設定** — 支援 SecurityPolicy、SecurityMode、帳號密碼認證
 
 ## 專案結構
@@ -66,7 +66,7 @@ cp Config/tags.example.csv Config/tags.csv
 | MailTo | 指定收件人（選填，覆蓋全域） | user@company.com |
 | MailCc | 指定副本（選填） | |
 | Type | 監控類型：number / bool / log | number |
-| Condition | 比較條件：greater / less / equal / not_equal | greater |
+| Condition | 比較條件：greater / less / equal / not_equal / unchanged | greater |
 | Threshold | 閾值 | 300 |
 | CountNeeded | 累積幾次才派報 | 1 |
 | Enable | 是否啟用：TRUE / FALSE | TRUE |

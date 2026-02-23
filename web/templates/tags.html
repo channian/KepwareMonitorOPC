@@ -6,6 +6,13 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h4 class="mb-0"><i class="bi bi-tags"></i> Tags 管理</h4>
     <div>
+        <input type="file" id="csvFileInput" accept=".csv" class="d-none" onchange="handleCsvUpload(this)">
+        <button class="btn btn-outline-secondary btn-sm" onclick="document.getElementById('csvFileInput').click()">
+            <i class="bi bi-upload"></i> 匯入 CSV
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="exportCsv()">
+            <i class="bi bi-download"></i> 匯出 CSV
+        </button>
         <button class="btn btn-success btn-sm" onclick="addRow()">
             <i class="bi bi-plus-lg"></i> 新增設備
         </button>
@@ -114,8 +121,6 @@ function deleteRow(index) {
 }
 
 function saveTags() {
-    const alert = document.getElementById('saveAlert');
-
     fetch('/api/tags', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -124,20 +129,113 @@ function saveTags() {
     .then(r => r.json())
     .then(data => {
         if (data.ok) {
-            alert.className = 'alert alert-success mb-3';
-            alert.textContent = '儲存成功 (' + data.count + ' 筆)';
+            showAlert('saveAlert', 'success', '儲存成功 (' + data.count + ' 筆)');
         } else {
-            alert.className = 'alert alert-danger mb-3';
-            alert.textContent = '儲存失敗: ' + (data.error || '未知錯誤');
+            showAlert('saveAlert', 'danger', '儲存失敗: ' + (data.error || '未知錯誤'));
         }
-        alert.classList.remove('d-none');
-        setTimeout(() => alert.classList.add('d-none'), 3000);
     })
     .catch(err => {
-        alert.className = 'alert alert-danger mb-3';
-        alert.textContent = '儲存失敗: ' + err;
-        alert.classList.remove('d-none');
+        showAlert('saveAlert', 'danger', '儲存失敗: ' + err);
     });
+}
+
+function handleCsvUpload(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const text = e.target.result;
+        const parsed = parseCsv(text);
+        if (parsed.headers.length === 0) {
+            showAlert('saveAlert', 'danger', 'CSV 解析失敗：找不到欄位標題');
+            return;
+        }
+        tagHeaders = parsed.headers;
+        tagRows = parsed.rows;
+        renderTable();
+        showAlert('saveAlert', 'warning',
+            '已匯入 ' + parsed.rows.length + ' 筆資料（尚未儲存），請確認後按「儲存」');
+    };
+    reader.readAsText(file, 'UTF-8');
+    input.value = '';
+}
+
+function parseCsv(text) {
+    const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+    if (lines.length === 0) return { headers: [], rows: [] };
+
+    const headers = parseCsvLine(lines[0]);
+    const rows = [];
+    for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        const values = parseCsvLine(line);
+        const row = {};
+        for (let j = 0; j < headers.length; j++) {
+            row[headers[j]] = values[j] || '';
+        }
+        rows.push(row);
+    }
+    return { headers, rows };
+}
+
+function parseCsvLine(line) {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (inQuotes) {
+            if (ch === '"' && line[i + 1] === '"') {
+                current += '"';
+                i++;
+            } else if (ch === '"') {
+                inQuotes = false;
+            } else {
+                current += ch;
+            }
+        } else {
+            if (ch === '"') {
+                inQuotes = true;
+            } else if (ch === ',') {
+                result.push(current);
+                current = '';
+            } else {
+                current += ch;
+            }
+        }
+    }
+    result.push(current);
+    return result;
+}
+
+function exportCsv() {
+    if (tagHeaders.length === 0) return;
+    let csv = tagHeaders.join(',') + '\n';
+    for (const row of tagRows) {
+        const values = tagHeaders.map(h => {
+            const val = row[h] || '';
+            return val.includes(',') || val.includes('"') || val.includes('\n')
+                ? '"' + val.replace(/"/g, '""') + '"' : val;
+        });
+        csv += values.join(',') + '\n';
+    }
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'tags.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function showAlert(id, type, msg) {
+    const el = document.getElementById(id);
+    el.className = 'alert alert-' + type + ' mb-3';
+    el.textContent = msg;
+    el.classList.remove('d-none');
+    if (type !== 'warning') setTimeout(() => el.classList.add('d-none'), 3000);
 }
 
 function escapeHtml(text) {

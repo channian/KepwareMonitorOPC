@@ -44,6 +44,7 @@ class DeviceConfig:
         self.counter = 0
         self.last_alert_time = 0  # timestamp，0 = 未發過
         self.last_diagnostic = None
+        self.last_value = None  # 上一次讀取值（供 unchanged 條件使用）
 
     @property
     def key(self):
@@ -55,6 +56,7 @@ class DeviceConfig:
             self.counter = old_device.counter
             self.last_alert_time = old_device.last_alert_time
             self.last_diagnostic = old_device.last_diagnostic
+            self.last_value = old_device.last_value
 
     def reset_state(self):
         self.counter = 0
@@ -336,6 +338,10 @@ class MonitorManager:
                 return (val == threshold), val
             if condition in ("not_equal", "!="):
                 return (val != threshold), val
+            if condition == "unchanged":
+                if device.last_value is None:
+                    return False, val
+                return (val == device.last_value), val
             return False, val
 
         if dtype == "bool":
@@ -362,6 +368,10 @@ class MonitorManager:
                 return (val == threshold), val
             if condition in ("not_equal", "!="):
                 return (val != threshold), val
+            if condition == "unchanged":
+                if device.last_value is None:
+                    return False, val
+                return (val == device.last_value), val
             return False, val
 
         return False, None
@@ -700,6 +710,10 @@ class MonitorManager:
 
         is_alert, parsed_value = self.evaluate(device, raw_value)
         write_val = parsed_value if parsed_value is not None else raw_value
+
+        # 更新上一次讀取值（供 unchanged 條件使用）
+        if parsed_value is not None:
+            device.last_value = parsed_value
 
         # LOG 類型：只記錄不判斷
         if device.device_type == "log":
