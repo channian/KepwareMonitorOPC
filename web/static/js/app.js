@@ -1,37 +1,6 @@
 // Kepware Monitor Web UI - Shared JS
 
 /**
- * 深/淺色模式切換按鈕
- */
-(function () {
-    function setup() {
-        // 初始化圖示
-        var theme = document.documentElement.getAttribute('data-bs-theme') || 'light';
-        var icon = document.getElementById('themeIcon');
-        if (icon) icon.className = theme === 'dark' ? 'bi bi-sun-fill' : 'bi bi-moon-fill';
-
-        // 綁定按鈕
-        var btn = document.getElementById('themeToggle');
-        if (btn) {
-            btn.addEventListener('click', function () {
-                var cur = document.documentElement.getAttribute('data-bs-theme') || 'light';
-                var next = cur === 'dark' ? 'light' : 'dark';
-                document.documentElement.setAttribute('data-bs-theme', next);
-                localStorage.setItem('theme', next);
-                var ic = document.getElementById('themeIcon');
-                if (ic) ic.className = next === 'dark' ? 'bi bi-sun-fill' : 'bi bi-moon-fill';
-            });
-        }
-    }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', setup);
-    } else {
-        setup();
-    }
-})();
-
-/**
  * 修改密碼（base.html 的 modal 使用）
  */
 function changePassword() {
