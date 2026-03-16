@@ -19,8 +19,9 @@ class DatabaseService:
         self._init_db()
 
     def _get_conn(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL;")  # 啟用 WAL 模式，提升並發寫入安全性
         return conn
 
     def _init_db(self):
@@ -62,6 +63,27 @@ class DatabaseService:
                     ON monitor_history(device_name);
                 CREATE INDEX IF NOT EXISTS idx_alert_ts
                     ON alert_log(timestamp);
+
+                CREATE TABLE IF NOT EXISTS kepware_event_log (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fetched_at    TEXT NOT NULL,
+                    event_time    TEXT,
+                    server_name   TEXT NOT NULL,
+                    channel_name  TEXT,
+                    device_name   TEXT,
+                    event_source  TEXT,
+                    event_message TEXT,
+                    severity      TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_event_fetched
+                    ON kepware_event_log(fetched_at DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_event_severity
+                    ON kepware_event_log(severity, fetched_at DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_event_channel
+                    ON kepware_event_log(channel_name, fetched_at DESC);
             """)
             conn.commit()
         finally:
@@ -126,6 +148,58 @@ class DatabaseService:
             conn.commit()
         finally:
             conn.close()
+
+    def write_event_logs(self, events: list[dict]) -> int:
+        """批次寫入 Kepware 事件日誌"""
+        if not events:
+            return 0
+        with self._get_conn() as conn:
+            conn.executemany("""
+                INSERT INTO kepware_event_log
+                    (fetched_at, event_time, server_name, channel_name,
+                     device_name, event_source, event_message, severity)
+                VALUES
+                    (:fetched_at, :event_time, :server_name, :channel_name,
+                     :device_name, :event_source, :event_message, :severity)
+            """, events)
+        return len(events)
+
+    def get_last_event_time(self, server_name: str) -> str | None:
+        """取得指定 server 最新的事件時間"""
+        with self._get_conn() as conn:
+            row = conn.execute("""
+                SELECT event_time FROM kepware_event_log
+                WHERE server_name = ?
+                ORDER BY event_time DESC
+                LIMIT 1
+            """, (server_name,)).fetchone()
+        return row["event_time"] if row else None
+
+    def query_event_logs(
+        self,
+        severity: str | None = None,
+        channel_name: str | None = None,
+        hours: int = 24,
+        limit: int = 200
+    ) -> list[dict]:
+        """查詢事件日誌"""
+        conditions = ["fetched_at >= datetime('now', ? || ' hours')"]
+        params: list = [f"-{hours}"]
+        if severity:
+            conditions.append("severity = ?")
+            params.append(severity)
+        if channel_name:
+            conditions.append("channel_name = ?")
+            params.append(channel_name)
+        where = " AND ".join(conditions)
+        with self._get_conn() as conn:
+            rows = conn.execute(f"""
+                SELECT * FROM kepware_event_log
+                WHERE {where}
+                ORDER BY fetched_at DESC
+                LIMIT ?
+            """, params + [limit]).fetchall()
+        return [dict(r) for r in rows]
 
     def query_history(self, start_date=None, end_date=None,
                       device_name=None, limit=500):
@@ -198,10 +272,15 @@ class DatabaseService:
                 DELETE FROM alert_log
                 WHERE julianday(?) - julianday(timestamp) > ?
             """
+            sql_events = """
+                DELETE FROM kepware_event_log
+                WHERE fetched_at < datetime('now', ? || ' days')
+            """
             cur1 = conn.execute(sql_history, (cutoff, days))
             cur2 = conn.execute(sql_alerts, (cutoff, days))
+            cur3 = conn.execute(sql_events, (f"-{days}",))
             conn.commit()
-            total = cur1.rowcount + cur2.rowcount
+            total = cur1.rowcount + cur2.rowcount + cur3.rowcount
             if total > 0:
                 logging.info(f"清理舊紀錄: 刪除 {total} 筆 (超過 {days} 天)")
             return total
