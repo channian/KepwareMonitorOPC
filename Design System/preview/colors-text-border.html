@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><link rel="stylesheet" href="_shell.css"><title>Colors — Borders &amp; Text</title>
+<style>
+.stack { display:grid; gap:8px; }
+.row-b { display:grid; grid-template-columns: 1fr 120px; align-items:center; padding: 10px 14px; border-radius: 6px; }
+.mono { font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); }
+</style></head>
+<body><div class="card">
+  <div class="cap" style="margin-bottom:10px">Foreground &amp; borders</div>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px">
+    <div>
+      <div class="cap" style="font-size:10px; margin-bottom:6px; color:var(--fg-3)">Text</div>
+      <div class="stack">
+        <div class="row-b" style="background:var(--bg-2)"><span style="color:#e6edf7; font-weight:600">Primary fg-1</span><span class="mono">#e6edf7</span></div>
+        <div class="row-b" style="background:var(--bg-2)"><span style="color:#94a3b8">Secondary fg-2</span><span class="mono">#94a3b8</span></div>
+        <div class="row-b" style="background:var(--bg-2)"><span style="color:#64748b">Tertiary fg-3</span><span class="mono">#64748b</span></div>
+        <div class="row-b" style="background:var(--bg-2)"><span style="color:#3f4b63">Disabled fg-4</span><span class="mono">#3f4b63</span></div>
+      </div>
+    </div>
+    <div>
+      <div class="cap" style="font-size:10px; margin-bottom:6px; color:var(--fg-3)">Borders</div>
+      <div class="stack">
+        <div class="row-b" style="background:var(--bg-2); border:1px solid #1e293b"><span>border-1</span><span class="mono">#1e293b</span></div>
+        <div class="row-b" style="background:var(--bg-2); border:1px solid #293548"><span>border-2</span><span class="mono">#293548</span></div>
+        <div class="row-b" style="background:var(--bg-2); border:1px solid #3b4a66"><span>border-3 (input)</span><span class="mono">#3b4a66</span></div>
+        <div class="row-b" style="background:var(--bg-2); border:1px solid #22d3ee; box-shadow:0 0 0 3px rgba(34,211,238,0.12)"><span>focus ring</span><span class="mono">accent</span></div>
+      </div>
+    </div>
+  </div>
+</div></body></html>

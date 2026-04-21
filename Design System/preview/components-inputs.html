@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><link rel="stylesheet" href="_shell.css"><title>Form Inputs</title>
+<style>
+.form { display:grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.fg { display:flex; flex-direction:column; gap: 5px; }
+.fg label { font-size: 11px; color: var(--fg-2); font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; }
+.fg input, .fg select { padding: 9px 12px; border: 1.5px solid #3b4a66; border-radius: 6px; background: #172033; color: #e6edf7; font-family: var(--font-mono); font-size: 13px; outline: none; transition: all 160ms; }
+.fg input.focus { border-color: #22d3ee; box-shadow: 0 0 0 3px rgba(34,211,238,0.12); }
+.fg input.err { border-color: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,0.15); }
+.fg .hint { font-size: 11px; color: var(--fg-3); font-family: var(--font-mono); }
+.fg .errmsg { font-size: 11px; color: #ef4444; }
+.check { display:flex; gap: 8px; align-items: center; font-size: 14px; color: var(--fg-1); grid-column: 1 / -1; }
+.check input { width: 16px; height: 16px; accent-color: #22d3ee; }
+</style></head>
+<body><div class="card">
+  <div class="cap" style="margin-bottom:10px">Inputs · focus ring accent · 6px radius</div>
+  <div class="form">
+    <div class="fg"><label>Server URL</label><input value="opc.tcp://192.168.1.10:49320"><div class="hint">opc.tcp://host:port</div></div>
+    <div class="fg"><label>閾值 Threshold</label><input class="focus" value="60"></div>
+    <div class="fg"><label>Condition</label>
+      <select><option>less</option><option>greater</option><option>equal</option></select>
+    </div>
+    <div class="fg"><label>Device IP</label><input class="err" value="192.168.2.5O"><div class="errmsg">無效的 IP 位址</div></div>
+    <label class="check"><input type="checkbox" checked> DRY RUN 預演模式（不會真的新增）</label>
+  </div>
+</div></body></html>

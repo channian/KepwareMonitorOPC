@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><link rel="stylesheet" href="_shell.css"><title>Status Pills &amp; Dots</title>
+<style>
+.dot { width: 9px; height: 9px; border-radius: 50%; display:inline-block; }
+.pill { display:inline-flex; align-items:center; gap:7px; padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; font-family: var(--font-mono); letter-spacing: 0.02em; }
+.p-ok { background: rgba(34,197,94,0.1); color: #22c55e; }
+.p-warn { background: rgba(245,158,11,0.1); color: #f59e0b; }
+.p-err { background: rgba(239,68,68,0.1); color: #ef4444; }
+.p-info { background: rgba(96,165,250,0.1); color: #60a5fa; }
+.p-muted { background: rgba(71,85,105,0.2); color: #94a3b8; }
+@keyframes ds-pulse { 0%,100% { opacity:1 } 50% { opacity: 0.55 } }
+.pulse { animation: ds-pulse 1.5s ease-in-out infinite; }
+.row { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px; align-items:center; }
+.lbl { font-size:11px; color:var(--fg-2); text-transform:uppercase; letter-spacing:0.08em; font-weight:600; margin-right:8px; min-width:100px;}
+</style></head>
+<body><div class="card">
+  <div class="cap" style="margin-bottom:12px">Status pills &amp; dots · glow halos sell "alive"</div>
+  <div class="row"><div class="lbl">Pills</div>
+    <span class="pill p-ok"><span class="dot" style="background:#22c55e; box-shadow:0 0 6px rgba(34,197,94,0.7)"></span>CONNECTED</span>
+    <span class="pill p-warn pulse"><span class="dot" style="background:#f59e0b; box-shadow:0 0 6px rgba(245,158,11,0.7)"></span>CONNECTING</span>
+    <span class="pill p-err"><span class="dot" style="background:#ef4444; box-shadow:0 0 8px rgba(239,68,68,0.8)"></span>HOST_DOWN</span>
+    <span class="pill p-info"><span class="dot" style="background:#60a5fa"></span>LOG_ONLY</span>
+    <span class="pill p-muted"><span class="dot" style="background:#475569"></span>DISABLED</span>
+  </div>
+  <div class="row"><div class="lbl">Inline dots</div>
+    <span style="font-family:var(--font-mono); font-size:13px; color:#e6edf7"><span class="dot" style="background:#22c55e; box-shadow:0 0 6px rgba(34,197,94,0.6); margin-right:8px"></span>iFIX1_SecondError</span>
+    <span style="font-family:var(--font-mono); font-size:13px; color:#e6edf7"><span class="dot" style="background:#ef4444; box-shadow:0 0 8px rgba(239,68,68,0.8); margin-right:8px"></span>iFIX3_SecondError</span>
+  </div>
+  <div class="row"><div class="lbl">Diagnostic</div>
+    <span class="pill p-err">L1 HOST_DOWN</span>
+    <span class="pill p-err">L2 OPC_SERVICE_DOWN</span>
+    <span class="pill p-warn">L3 DEVICE_DOWN</span>
+    <span class="pill p-warn">L3 IGS_SERVICE_DOWN</span>
+    <span class="pill p-warn">VALUE_ABNORMAL</span>
+  </div>
+</div></body></html>

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><link rel="stylesheet" href="_shell.css"><title>Table</title>
+<style>
+.wrap { border: 1px solid #1e293b; border-radius: 8px; overflow:hidden; background: #0f172a; }
+table { width:100%; border-collapse: collapse; font-size: 13px; }
+th { background: #0a0f1a; padding: 10px 14px; text-align:left; font-weight:600; color:#94a3b8; font-size:11px; text-transform:uppercase; letter-spacing:0.08em; border-bottom:1px solid #1e293b; white-space:nowrap; }
+td { padding: 10px 14px; border-bottom: 1px solid #1e293b; color:#e6edf7; font-size:13px; }
+tr:last-child td { border-bottom:none; }
+tbody tr:nth-child(even) { background: #111a2b; }
+tbody tr:hover { background: #172033; }
+.mono { font-family: var(--font-mono); color:#94a3b8; font-size:12px; }
+.dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:8px; vertical-align:middle; }
+.n { text-align:right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+</style></head>
+<body><div class="card">
+  <div class="cap" style="margin-bottom:10px">Data table · zebra stripe on even rows · hover lift</div>
+  <div class="wrap">
+    <table>
+      <thead><tr><th>Device</th><th>Server</th><th>NodeId</th><th class="n">Value</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td><span class="dot" style="background:#22c55e; box-shadow:0 0 6px rgba(34,197,94,0.6)"></span>iFIX1_SecondError</td><td>kepware_a</td><td class="mono">ns=2;s=Channel1.iFIX1._System._Sec…</td><td class="n">12</td><td class="mono" style="color:#22c55e">OK</td></tr>
+        <tr><td><span class="dot" style="background:#f59e0b; box-shadow:0 0 6px rgba(245,158,11,0.6)"></span>iFIX2_SecondError</td><td>kepware_a</td><td class="mono">ns=2;s=Channel1.iFIX2._System._Sec…</td><td class="n">58</td><td class="mono" style="color:#f59e0b">WARN 2/3</td></tr>
+        <tr><td><span class="dot" style="background:#ef4444; box-shadow:0 0 8px rgba(239,68,68,0.8)"></span>iFIX3_SecondError</td><td>kepware_b</td><td class="mono">ns=2;s=Channel2.iFIX3._System._Sec…</td><td class="n">124</td><td class="mono" style="color:#ef4444">VALUE_ABNORMAL</td></tr>
+        <tr><td><span class="dot" style="background:#475569"></span>LogOnly_Value</td><td>kepware_a</td><td class="mono">ns=2;s=Channel1.Device1.SomeValue</td><td class="n">—</td><td class="mono" style="color:#94a3b8">DISABLED</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div></body></html>
