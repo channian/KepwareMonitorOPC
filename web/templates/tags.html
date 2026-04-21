@@ -1,50 +1,39 @@
 {% extends "base.html" %}
 {% block title %}Tags 管理 - Kepware Monitor{% endblock %}
 {% block nav_tags %}active{% endblock %}
+{% block page_title %}監控點位 · Tags{% endblock %}
+{% block crumbs %}home / tags{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h4 class="mb-0"><i class="bi bi-tags"></i> Tags 管理</h4>
-    <div>
+<div class="section-hd">
+    <h2>監控點位</h2>
+    <span class="count" id="pageInfo">—</span>
+    <div class="actions">
         <input type="file" id="csvFileInput" accept=".csv" class="d-none" onchange="handleCsvUpload(this)">
-        <button class="btn btn-outline-secondary btn-sm" onclick="document.getElementById('csvFileInput').click()">
-            <i class="bi bi-upload"></i> 匯入 CSV
-        </button>
-        <button class="btn btn-outline-secondary btn-sm" onclick="exportCsv()">
-            <i class="bi bi-download"></i> 匯出 CSV
-        </button>
-        <button class="btn btn-success btn-sm" onclick="addRow()">
-            <i class="bi bi-plus-lg"></i> 新增設備
-        </button>
-        <button class="btn btn-primary btn-sm" onclick="saveTags()">
-            <i class="bi bi-save"></i> 儲存
-        </button>
+        <button class="btn btn-ghost" onclick="document.getElementById('csvFileInput').click()"><i data-lucide="upload"></i>匯入 CSV</button>
+        <button class="btn btn-ghost" onclick="exportCsv()"><i data-lucide="download"></i>匯出 CSV</button>
+        <button class="btn btn-accent btn-sm" onclick="addRow()"><i data-lucide="plus"></i>新增點位</button>
+        <button class="btn btn-primary" onclick="saveTags()"><i data-lucide="save"></i>儲存</button>
     </div>
 </div>
 
-<div id="saveAlert" class="alert d-none mb-3"></div>
+<div id="saveAlert" class="alert-banner"></div>
 
-<!-- 搜尋列 -->
-<div class="row mb-2">
-    <div class="col-md-4">
-        <div class="input-group input-group-sm">
-            <span class="input-group-text"><i class="bi bi-search"></i></span>
-            <input type="text" class="form-control" id="searchInput" placeholder="搜尋 Name / NodeId / Description ..."
-                   oninput="onSearch()">
-            <button class="btn btn-outline-secondary" type="button" onclick="document.getElementById('searchInput').value='';onSearch();">
-                <i class="bi bi-x-lg"></i>
-            </button>
-        </div>
+<!-- Search -->
+<div class="d-flex gap-3 items-center mb-4">
+    <div class="search-wrap" style="width:350px;">
+        <i data-lucide="search"></i>
+        <input type="text" class="input" id="searchInput" placeholder="搜尋 Name / NodeId / Description ..."
+               oninput="onSearch()">
     </div>
-    <div class="col-md-8 d-flex align-items-center justify-content-end">
-        <span class="text-muted small" id="pageInfo"></span>
-    </div>
+    <button class="btn btn-ghost btn-sm" onclick="document.getElementById('searchInput').value='';onSearch();">清除</button>
 </div>
 
-<div class="card">
-    <div class="table-responsive">
-        <table class="table table-hover table-sm mb-0" id="tagsTable">
-            <thead class="table-light">
+<!-- Table -->
+<div class="card-ui">
+    <div class="tbl-wrap max-h-70vh">
+        <table id="tagsTable">
+            <thead>
                 <tr id="tagsHeader">
                     <th style="width:40px">操作</th>
                 </tr>
@@ -56,31 +45,27 @@
     </div>
 </div>
 
-<!-- 分頁列 -->
-<div class="d-flex justify-content-between align-items-center mt-2">
-    <div class="text-muted small">
-        提示: 修改後請按「儲存」，CSV 會在下一次重載週期自動生效（無須重啟監控程式）
-    </div>
-    <nav>
-        <ul class="pagination pagination-sm mb-0" id="pagination"></ul>
-    </nav>
+<!-- Pagination -->
+<div class="d-flex justify-between items-center mt-3">
+    <div class="form-hint" style="margin-top:0;">修改後請按「儲存」，CSV 會在下一次重載週期自動生效</div>
+    <div class="pagination" id="pagination"></div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-let tagHeaders = [];
-let tagRows = [];
-let currentPage = 1;
-const pageSize = 50;
-let searchKeyword = '';
+var tagHeaders = [];
+var tagRows = [];
+var currentPage = 1;
+var pageSize = 50;
+var searchKeyword = '';
 
 loadTags();
 
 function loadTags() {
     fetch('/api/tags')
-        .then(r => r.json())
-        .then(data => {
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
             tagHeaders = data.headers || [];
             tagRows = data.rows || [];
             currentPage = 1;
@@ -89,16 +74,14 @@ function loadTags() {
 }
 
 function getFilteredIndices() {
-    if (!searchKeyword) {
-        return tagRows.map((_, i) => i);
-    }
-    const kw = searchKeyword.toLowerCase();
-    const searchCols = ['Name', 'NodeId', 'Description', 'Server'];
-    const indices = [];
-    for (let i = 0; i < tagRows.length; i++) {
-        const row = tagRows[i];
-        for (const col of searchCols) {
-            if (row[col] && row[col].toLowerCase().includes(kw)) {
+    if (!searchKeyword) return tagRows.map(function(_, i) { return i; });
+    var kw = searchKeyword.toLowerCase();
+    var searchCols = ['Name', 'NodeId', 'Description', 'Server'];
+    var indices = [];
+    for (var i = 0; i < tagRows.length; i++) {
+        var row = tagRows[i];
+        for (var j = 0; j < searchCols.length; j++) {
+            if (row[searchCols[j]] && row[searchCols[j]].toLowerCase().indexOf(kw) >= 0) {
                 indices.push(i);
                 break;
             }
@@ -108,83 +91,70 @@ function getFilteredIndices() {
 }
 
 function renderTable() {
-    // Header
-    const headerRow = document.getElementById('tagsHeader');
-    let hHtml = '<th style="width:40px">操作</th>';
-    for (const h of tagHeaders) {
-        hHtml += `<th class="small">${h}</th>`;
+    var headerRow = document.getElementById('tagsHeader');
+    var hHtml = '<th style="width:40px">操作</th>';
+    for (var h = 0; h < tagHeaders.length; h++) {
+        hHtml += '<th>' + tagHeaders[h] + '</th>';
     }
     headerRow.innerHTML = hHtml;
 
-    const filtered = getFilteredIndices();
-    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    var filtered = getFilteredIndices();
+    var totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
     if (currentPage > totalPages) currentPage = totalPages;
 
-    const start = (currentPage - 1) * pageSize;
-    const pageIndices = filtered.slice(start, start + pageSize);
+    var start = (currentPage - 1) * pageSize;
+    var pageIndices = filtered.slice(start, start + pageSize);
 
-    // Page info
-    const info = document.getElementById('pageInfo');
-    if (searchKeyword) {
-        info.textContent = `搜尋結果: ${filtered.length} / ${tagRows.length} 筆`;
-    } else {
-        info.textContent = `共 ${tagRows.length} 筆`;
-    }
+    var info = document.getElementById('pageInfo');
+    info.textContent = searchKeyword
+        ? '搜尋: ' + filtered.length + ' / ' + tagRows.length + ' 筆'
+        : tagRows.length + ' tags';
 
-    // Body
-    const tbody = document.getElementById('tagsBody');
+    var tbody = document.getElementById('tagsBody');
     if (pageIndices.length === 0) {
         tbody.innerHTML = '<tr><td colspan="' + (tagHeaders.length + 1) + '" class="text-center text-muted">無資料</td></tr>';
         renderPagination(totalPages);
         return;
     }
 
-    let html = '';
-    for (const i of pageIndices) {
+    var html = '';
+    for (var idx = 0; idx < pageIndices.length; idx++) {
+        var i = pageIndices[idx];
         html += '<tr>';
-        html += `<td>
-            <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="deleteRow(${i})" title="刪除">
-                <i class="bi bi-trash"></i>
-            </button>
-        </td>`;
-        for (const h of tagHeaders) {
-            const val = tagRows[i][h] || '';
-            const width = h === 'NodeId' ? 'min-width:280px' : h === 'Name' ? 'min-width:150px' : 'min-width:80px';
-            html += `<td><input type="text" class="form-control form-control-sm" style="${width}"
-                     value="${escapeHtml(val)}" data-row="${i}" data-col="${h}"
-                     onchange="updateCell(${i}, '${h}', this.value)"></td>`;
+        html += '<td><button class="btn btn-danger btn-xs" onclick="deleteRow(' + i + ')" title="刪除"><i data-lucide="trash-2"></i></button></td>';
+        for (var c = 0; c < tagHeaders.length; c++) {
+            var col = tagHeaders[c];
+            var val = tagRows[i][col] || '';
+            var width = col === 'NodeId' ? 'min-width:280px' : col === 'Name' ? 'min-width:150px' : 'min-width:80px';
+            html += '<td><input type="text" class="input input-sm" style="' + width + '"' +
+                     ' value="' + escapeHtml(val) + '" data-row="' + i + '" data-col="' + col + '"' +
+                     ' onchange="updateCell(' + i + ',\'' + col + '\',this.value)"></td>';
         }
         html += '</tr>';
     }
     tbody.innerHTML = html;
     renderPagination(totalPages);
+    reinitIcons();
 }
 
 function renderPagination(totalPages) {
-    const ul = document.getElementById('pagination');
+    var ul = document.getElementById('pagination');
     if (totalPages <= 1) { ul.innerHTML = ''; return; }
-
-    let html = '';
-    html += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
-        <a class="page-link" href="#" onclick="goPage(${currentPage - 1});return false;">&laquo;</a></li>`;
-
-    let startP = Math.max(1, currentPage - 2);
-    let endP = Math.min(totalPages, startP + 4);
+    var html = '';
+    html += '<a class="page-btn ' + (currentPage === 1 ? 'disabled' : '') + '" href="#" onclick="goPage(' + (currentPage - 1) + ');return false;">&laquo;</a>';
+    var startP = Math.max(1, currentPage - 2);
+    var endP = Math.min(totalPages, startP + 4);
     if (endP - startP < 4) startP = Math.max(1, endP - 4);
-
-    for (let p = startP; p <= endP; p++) {
-        html += `<li class="page-item ${p === currentPage ? 'active' : ''}">
-            <a class="page-link" href="#" onclick="goPage(${p});return false;">${p}</a></li>`;
+    for (var p = startP; p <= endP; p++) {
+        html += '<a class="page-btn ' + (p === currentPage ? 'active' : '') + '" href="#" onclick="goPage(' + p + ');return false;">' + p + '</a>';
     }
-
-    html += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
-        <a class="page-link" href="#" onclick="goPage(${currentPage + 1});return false;">&raquo;</a></li>`;
+    html += '<a class="page-btn ' + (currentPage === totalPages ? 'disabled' : '') + '" href="#" onclick="goPage(' + (currentPage + 1) + ');return false;">&raquo;</a>';
     ul.innerHTML = html;
 }
 
 function goPage(p) {
-    const filtered = getFilteredIndices();
-    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    var filtered = getFilteredIndices();
+    var totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
     if (p < 1 || p > totalPages) return;
     currentPage = p;
     renderTable();
@@ -196,23 +166,18 @@ function onSearch() {
     renderTable();
 }
 
-function updateCell(row, col, value) {
-    tagRows[row][col] = value;
-}
+function updateCell(row, col, value) { tagRows[row][col] = value; }
 
 function addRow() {
-    const newRow = {};
-    for (const h of tagHeaders) {
-        newRow[h] = '';
-    }
+    var newRow = {};
+    for (var i = 0; i < tagHeaders.length; i++) newRow[tagHeaders[i]] = '';
     newRow['Enable'] = 'TRUE';
     newRow['Type'] = 'number';
     newRow['CountNeeded'] = '1';
     tagRows.push(newRow);
-    // 跳到最後一頁
     searchKeyword = '';
     document.getElementById('searchInput').value = '';
-    const totalPages = Math.ceil(tagRows.length / pageSize);
+    var totalPages = Math.ceil(tagRows.length / pageSize);
     currentPage = totalPages;
     renderTable();
 }
@@ -229,29 +194,28 @@ function saveTags() {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({headers: tagHeaders, rows: tagRows}),
     })
-    .then(r => r.json())
-    .then(data => {
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
         if (data.ok) {
-            showAlert('saveAlert', 'success', '儲存成功 (' + data.count + ' 筆)');
+            showPageAlert('saveAlert', 'ok', '儲存成功 (' + data.count + ' 筆)');
         } else {
-            showAlert('saveAlert', 'danger', '儲存失敗: ' + (data.error || '未知錯誤'));
+            showPageAlert('saveAlert', 'err', '儲存失敗: ' + (data.error || '未知錯誤'));
         }
     })
-    .catch(err => {
-        showAlert('saveAlert', 'danger', '儲存失敗: ' + err);
+    .catch(function(err) {
+        showPageAlert('saveAlert', 'err', '儲存失敗: ' + err);
     });
 }
 
 function handleCsvUpload(input) {
-    const file = input.files[0];
+    var file = input.files[0];
     if (!file) return;
-
-    const reader = new FileReader();
+    var reader = new FileReader();
     reader.onload = function(e) {
-        const text = e.target.result;
-        const parsed = parseCsv(text);
+        var text = e.target.result;
+        var parsed = parseCsv(text);
         if (parsed.headers.length === 0) {
-            showAlert('saveAlert', 'danger', 'CSV 解析失敗：找不到欄位標題');
+            showPageAlert('saveAlert', 'err', 'CSV 解析失敗：找不到欄位標題');
             return;
         }
         tagHeaders = parsed.headers;
@@ -260,56 +224,42 @@ function handleCsvUpload(input) {
         searchKeyword = '';
         document.getElementById('searchInput').value = '';
         renderTable();
-        showAlert('saveAlert', 'warning',
-            '已匯入 ' + parsed.rows.length + ' 筆資料（尚未儲存），請確認後按「儲存」');
+        showPageAlert('saveAlert', 'warn', '已匯入 ' + parsed.rows.length + ' 筆資料（尚未儲存），請確認後按「儲存」');
     };
     reader.readAsText(file, 'UTF-8');
     input.value = '';
 }
 
 function parseCsv(text) {
-    const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+    var lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
     if (lines.length === 0) return { headers: [], rows: [] };
-
-    const headers = parseCsvLine(lines[0]);
-    const rows = [];
-    for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
+    var headers = parseCsvLine(lines[0]);
+    var rows = [];
+    for (var i = 1; i < lines.length; i++) {
+        var line = lines[i].trim();
         if (!line) continue;
-        const values = parseCsvLine(line);
-        const row = {};
-        for (let j = 0; j < headers.length; j++) {
-            row[headers[j]] = values[j] || '';
-        }
+        var values = parseCsvLine(line);
+        var row = {};
+        for (var j = 0; j < headers.length; j++) row[headers[j]] = values[j] || '';
         rows.push(row);
     }
-    return { headers, rows };
+    return { headers: headers, rows: rows };
 }
 
 function parseCsvLine(line) {
-    const result = [];
-    let current = '';
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-        const ch = line[i];
+    var result = [];
+    var current = '';
+    var inQuotes = false;
+    for (var i = 0; i < line.length; i++) {
+        var ch = line[i];
         if (inQuotes) {
-            if (ch === '"' && line[i + 1] === '"') {
-                current += '"';
-                i++;
-            } else if (ch === '"') {
-                inQuotes = false;
-            } else {
-                current += ch;
-            }
+            if (ch === '"' && line[i + 1] === '"') { current += '"'; i++; }
+            else if (ch === '"') { inQuotes = false; }
+            else { current += ch; }
         } else {
-            if (ch === '"') {
-                inQuotes = true;
-            } else if (ch === ',') {
-                result.push(current);
-                current = '';
-            } else {
-                current += ch;
-            }
+            if (ch === '"') { inQuotes = true; }
+            else if (ch === ',') { result.push(current); current = ''; }
+            else { current += ch; }
         }
     }
     result.push(current);
@@ -318,36 +268,22 @@ function parseCsvLine(line) {
 
 function exportCsv() {
     if (tagHeaders.length === 0) return;
-    let csv = tagHeaders.join(',') + '\n';
-    for (const row of tagRows) {
-        const values = tagHeaders.map(h => {
-            const val = row[h] || '';
-            return val.includes(',') || val.includes('"') || val.includes('\n')
+    var csv = tagHeaders.join(',') + '\n';
+    for (var i = 0; i < tagRows.length; i++) {
+        var values = tagHeaders.map(function(h) {
+            var val = tagRows[i][h] || '';
+            return (val.indexOf(',') >= 0 || val.indexOf('"') >= 0 || val.indexOf('\n') >= 0)
                 ? '"' + val.replace(/"/g, '""') + '"' : val;
         });
         csv += values.join(',') + '\n';
     }
-    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    var blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
     a.href = url;
     a.download = 'tags.csv';
     a.click();
     URL.revokeObjectURL(url);
-}
-
-function showAlert(id, type, msg) {
-    const el = document.getElementById(id);
-    el.className = 'alert alert-' + type + ' mb-3';
-    el.textContent = msg;
-    el.classList.remove('d-none');
-    if (type !== 'warning') setTimeout(() => el.classList.add('d-none'), 3000);
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML.replace(/"/g, '&quot;');
 }
 </script>
 {% endblock %}

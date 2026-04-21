@@ -1,82 +1,61 @@
 {% extends "base.html" %}
-{% block title %}狀態看板 - Kepware Monitor{% endblock %}
+{% block title %}儀表板 - Kepware Monitor{% endblock %}
 {% block nav_dashboard %}active{% endblock %}
+{% block page_title %}設備監控儀表板{% endblock %}
+{% block crumbs %}home / overview{% endblock %}
+
+{% block top_meta %}
+<div class="poll-badge" id="sseStatus">
+    <span class="dot-inline dot-muted" id="sseDot"></span>連線中...
+</div>
+<span style="font-family:var(--font-mono);font-size:12px;color:var(--fg-3);" id="lastUpdate"></span>
+{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h4 class="mb-0"><i class="bi bi-speedometer2"></i> 狀態看板</h4>
-    <div class="d-flex align-items-center gap-3">
-        <span id="lastUpdate" class="text-muted small"></span>
-        <span id="sseStatus" class="badge bg-secondary">連線中...</span>
+<!-- Metrics -->
+<div class="metrics" id="metricsRow">
+    <div class="card-ui">
+        <div class="card-hd"><i data-lucide="server"></i><span class="t">SERVERS</span></div>
+        <div class="metric-v" id="totalDevices">-</div>
+    </div>
+    <div class="card-ui">
+        <div class="card-hd"><i data-lucide="check-circle"></i><span class="t">正常</span></div>
+        <div class="metric-v text-ok" id="normalCount">-</div>
+    </div>
+    <div class="card-ui metric-active">
+        <div class="card-hd"><i data-lucide="alert-triangle"></i><span class="t" style="color:var(--accent);">異常</span></div>
+        <div class="metric-v text-err" id="alertCount">-</div>
+    </div>
+    <div class="card-ui">
+        <div class="card-hd"><i data-lucide="pause-circle"></i><span class="t">停用</span></div>
+        <div class="metric-v text-muted" id="disabledCount">-</div>
     </div>
 </div>
 
-<!-- 連線狀態 -->
-<div class="row mb-3" id="connectionCards">
-    <!-- 動態產生 -->
-</div>
+<!-- Connection cards -->
+<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px;" id="connectionCards"></div>
 
-<!-- 統計摘要 -->
-<div class="row mb-3">
-    <div class="col-md-3">
-        <div class="card text-center">
-            <div class="card-body py-2">
-                <div class="text-muted small">總監控點數</div>
-                <div class="fs-4 fw-bold" id="totalDevices">-</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card text-center">
-            <div class="card-body py-2">
-                <div class="text-muted small">正常</div>
-                <div class="fs-4 fw-bold text-success" id="normalCount">-</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card text-center">
-            <div class="card-body py-2">
-                <div class="text-muted small">異常</div>
-                <div class="fs-4 fw-bold text-danger" id="alertCount">-</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card text-center">
-            <div class="card-body py-2">
-                <div class="text-muted small">停用</div>
-                <div class="fs-4 fw-bold text-secondary" id="disabledCount">-</div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- 設備列表 -->
-<div class="card">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <div class="d-flex align-items-center gap-2">
-            <span>監控設備</span>
-            <span class="text-muted small" id="devicePageInfo"></span>
-        </div>
-        <div class="d-flex align-items-center gap-2">
-            <div class="input-group input-group-sm" style="width:250px;">
-                <span class="input-group-text"><i class="bi bi-search"></i></span>
-                <input type="text" class="form-control" id="deviceSearch" placeholder="搜尋名稱 / Server ..."
+<!-- Device table -->
+<div class="card-ui">
+    <div class="card-hd">
+        <i data-lucide="cpu"></i>
+        <span class="t">監控設備</span>
+        <span class="t" id="devicePageInfo" style="color:var(--fg-3);text-transform:none;"></span>
+        <span class="spacer"></span>
+        <div class="d-flex gap-2 items-center">
+            <div class="search-wrap" style="width:250px;">
+                <i data-lucide="search"></i>
+                <input type="text" class="input input-sm" id="deviceSearch" placeholder="搜尋名稱 / Server ..."
                        oninput="onDeviceSearch()">
-                <button class="btn btn-outline-secondary" type="button"
-                        onclick="document.getElementById('deviceSearch').value='';onDeviceSearch();">
-                    <i class="bi bi-x-lg"></i>
-                </button>
             </div>
-            <button class="btn btn-sm btn-outline-secondary" onclick="filterDevices('all')">全部</button>
-            <button class="btn btn-sm btn-outline-danger" onclick="filterDevices('alert')">異常</button>
-            <button class="btn btn-sm btn-outline-success" onclick="filterDevices('normal')">正常</button>
+            <button class="btn btn-ghost btn-sm" onclick="filterDevices('all')">全部</button>
+            <button class="btn btn-sm" style="background:var(--err-bg);color:var(--err);border:1px solid rgba(239,68,68,0.3);" onclick="filterDevices('alert')">異常</button>
+            <button class="btn btn-sm" style="background:var(--ok-bg);color:var(--ok);border:1px solid rgba(34,197,94,0.3);" onclick="filterDevices('normal')">正常</button>
         </div>
     </div>
-    <div class="table-responsive">
-        <table class="table table-hover table-sm mb-0">
-            <thead class="table-light">
+    <div class="tbl-wrap max-h-70vh">
+        <table>
+            <thead>
                 <tr>
                     <th style="width:40px">狀態</th>
                     <th>設備名稱</th>
@@ -89,19 +68,15 @@
                 </tr>
             </thead>
             <tbody id="deviceTableBody">
-                <tr>
-                    <td colspan="8" class="text-center text-muted">載入中...</td>
-                </tr>
+                <tr><td colspan="8" class="text-center text-muted">載入中...</td></tr>
             </tbody>
         </table>
     </div>
 </div>
 
-<!-- 分頁 -->
-<div class="d-flex justify-content-end mt-2">
-    <nav>
-        <ul class="pagination pagination-sm mb-0" id="devicePagination"></ul>
-    </nav>
+<!-- Pagination -->
+<div style="display:flex;justify-content:flex-end;margin-top:12px;">
+    <div class="pagination" id="devicePagination"></div>
 </div>
 {% endblock %}
 
@@ -113,20 +88,16 @@ var deviceSearchKw = '';
 var devicePage = 1;
 var devicePageSize = 50;
 
-// 初始載入
 fetchStatus();
 
-// SSE 即時更新
 var evtSource = new EventSource('/api/dashboard/sse');
 evtSource.onmessage = function(event) {
     var data = JSON.parse(event.data);
     updateDashboard(data);
-    document.getElementById('sseStatus').className = 'badge bg-success';
-    document.getElementById('sseStatus').textContent = '即時連線';
+    document.getElementById('sseStatus').innerHTML = '<span class="dot-inline dot-ok pulse-dot"></span>LIVE';
 };
 evtSource.onerror = function() {
-    document.getElementById('sseStatus').className = 'badge bg-danger';
-    document.getElementById('sseStatus').textContent = '連線中斷';
+    document.getElementById('sseStatus').innerHTML = '<span class="dot-inline dot-err"></span>連線中斷';
 };
 
 function fetchStatus() {
@@ -137,34 +108,24 @@ function fetchStatus() {
 }
 
 function updateDashboard(data) {
-    // 更新時間
-    document.getElementById('lastUpdate').textContent = '最後更新: ' + data.timestamp;
+    document.getElementById('lastUpdate').textContent = data.timestamp;
 
-    // 連線狀態卡片
     var connDiv = document.getElementById('connectionCards');
     var connHtml = '';
     for (var name in (data.connections || {})) {
         var info = data.connections[name];
-        var color = info.connected ? 'success' : 'danger';
-        var icon = info.connected ? 'bi-check-circle-fill' : 'bi-x-circle-fill';
-        var status = info.connected ? '已連線' : '斷線';
+        var kind = info.connected ? 'ok' : 'err';
+        var status = info.connected ? 'CONNECTED' : 'DISCONNECTED';
         connHtml +=
-            '<div class="col-auto">' +
-                '<div class="card border-' + color + '">' +
-                    '<div class="card-body py-2 px-3 d-flex align-items-center gap-2">' +
-                        '<i class="bi ' + icon + ' text-' + color + '"></i>' +
-                        '<span class="fw-bold">' + name + '</span>' +
-                        '<span class="badge bg-' + color + '">' + status + '</span>' +
-                    '</div>' +
-                '</div>' +
+            '<div class="card-ui" style="padding:12px 16px;display:flex;align-items:center;gap:10px;">' +
+                '<span class="dot-inline dot-' + kind + '"></span>' +
+                '<span style="font-weight:600;">' + name + '</span>' +
+                '<span class="pill p-' + kind + '"><span class="dot"></span>' + status + '</span>' +
             '</div>';
     }
     connDiv.innerHTML = connHtml;
 
-    // 設備資料
     allDevices = data.devices || [];
-
-    // 統計
     var enabled = allDevices.filter(function(d) { return d.enable; });
     var alertDevices = enabled.filter(function(d) { return d.is_alert; });
     var normalDevices = enabled.filter(function(d) { return !d.is_alert; });
@@ -180,15 +141,11 @@ function updateDashboard(data) {
 
 function getFilteredDevices() {
     var list = allDevices;
-
-    // 狀態篩選
     if (currentFilter === 'alert') {
         list = list.filter(function(d) { return d.enable && d.is_alert; });
     } else if (currentFilter === 'normal') {
         list = list.filter(function(d) { return d.enable && !d.is_alert; });
     }
-
-    // 搜尋
     if (deviceSearchKw) {
         var kw = deviceSearchKw.toLowerCase();
         list = list.filter(function(d) {
@@ -197,21 +154,11 @@ function getFilteredDevices() {
                    (d.diagnostic && d.diagnostic.toLowerCase().indexOf(kw) >= 0);
         });
     }
-
     return list;
 }
 
-function filterDevices(filter) {
-    currentFilter = filter;
-    devicePage = 1;
-    renderDeviceTable();
-}
-
-function onDeviceSearch() {
-    deviceSearchKw = document.getElementById('deviceSearch').value.trim();
-    devicePage = 1;
-    renderDeviceTable();
-}
+function filterDevices(filter) { currentFilter = filter; devicePage = 1; renderDeviceTable(); }
+function onDeviceSearch() { deviceSearchKw = document.getElementById('deviceSearch').value.trim(); devicePage = 1; renderDeviceTable(); }
 
 function renderDeviceTable() {
     var filtered = getFilteredDevices();
@@ -221,7 +168,6 @@ function renderDeviceTable() {
     var start = (devicePage - 1) * devicePageSize;
     var pageItems = filtered.slice(start, start + devicePageSize);
 
-    // 頁面資訊
     var info = document.getElementById('devicePageInfo');
     if (deviceSearchKw) {
         info.textContent = '(搜尋: ' + filtered.length + ' / ' + allDevices.length + ' 筆)';
@@ -241,28 +187,24 @@ function renderDeviceTable() {
     var html = '';
     for (var idx = 0; idx < pageItems.length; idx++) {
         var d = pageItems[idx];
-        var statusIcon, statusClass;
+        var dotClass, rowStyle;
         if (!d.enable) {
-            statusIcon = '<i class="bi bi-dash-circle text-secondary"></i>';
-            statusClass = 'table-light text-muted';
+            dotClass = 'dot-muted'; rowStyle = 'opacity:0.5;';
         } else if (d.is_alert) {
-            statusIcon = '<i class="bi bi-exclamation-triangle-fill text-danger"></i>';
-            statusClass = 'table-danger';
+            dotClass = 'dot-err'; rowStyle = 'background:var(--err-bg);';
         } else {
-            statusIcon = '<i class="bi bi-check-circle-fill text-success"></i>';
-            statusClass = '';
+            dotClass = 'dot-ok'; rowStyle = '';
         }
-
         html +=
-            '<tr class="' + statusClass + '">' +
-                '<td class="text-center">' + statusIcon + '</td>' +
-                '<td>' + d.name + '</td>' +
-                '<td>' + d.server_name + '</td>' +
-                '<td><span class="badge bg-info">' + d.device_type + '</span></td>' +
-                '<td>' + (d.condition || '-') + '</td>' +
-                '<td>' + (d.threshold || '-') + '</td>' +
-                '<td>' + d.counter + '/' + d.accumulate + '</td>' +
-                '<td class="small">' + (d.diagnostic || '-') + '</td>' +
+            '<tr style="' + rowStyle + '">' +
+                '<td class="text-center"><span class="dot-inline ' + dotClass + '"></span></td>' +
+                '<td style="font-weight:600;">' + d.name + '</td>' +
+                '<td class="td-mono">' + d.server_name + '</td>' +
+                '<td><span class="pill p-info"><span class="dot"></span>' + d.device_type + '</span></td>' +
+                '<td class="td-mono">' + (d.condition || '-') + '</td>' +
+                '<td class="td-num">' + (d.threshold || '-') + '</td>' +
+                '<td class="td-mono">' + d.counter + '/' + d.accumulate + '</td>' +
+                '<td class="td-mono" style="font-size:11px;">' + (d.diagnostic || '-') + '</td>' +
             '</tr>';
     }
     tbody.innerHTML = html;
@@ -272,22 +214,15 @@ function renderDeviceTable() {
 function renderDevicePagination(totalPages) {
     var ul = document.getElementById('devicePagination');
     if (totalPages <= 1) { ul.innerHTML = ''; return; }
-
     var html = '';
-    html += '<li class="page-item ' + (devicePage === 1 ? 'disabled' : '') + '">' +
-        '<a class="page-link" href="#" onclick="goDevicePage(' + (devicePage - 1) + ');return false;">&laquo;</a></li>';
-
+    html += '<a class="page-btn ' + (devicePage === 1 ? 'disabled' : '') + '" href="#" onclick="goDevicePage(' + (devicePage - 1) + ');return false;">&laquo;</a>';
     var startP = Math.max(1, devicePage - 2);
     var endP = Math.min(totalPages, startP + 4);
     if (endP - startP < 4) startP = Math.max(1, endP - 4);
-
     for (var p = startP; p <= endP; p++) {
-        html += '<li class="page-item ' + (p === devicePage ? 'active' : '') + '">' +
-            '<a class="page-link" href="#" onclick="goDevicePage(' + p + ');return false;">' + p + '</a></li>';
+        html += '<a class="page-btn ' + (p === devicePage ? 'active' : '') + '" href="#" onclick="goDevicePage(' + p + ');return false;">' + p + '</a>';
     }
-
-    html += '<li class="page-item ' + (devicePage === totalPages ? 'disabled' : '') + '">' +
-        '<a class="page-link" href="#" onclick="goDevicePage(' + (devicePage + 1) + ');return false;">&raquo;</a></li>';
+    html += '<a class="page-btn ' + (devicePage === totalPages ? 'disabled' : '') + '" href="#" onclick="goDevicePage(' + (devicePage + 1) + ');return false;">&raquo;</a>';
     ul.innerHTML = html;
 }
 

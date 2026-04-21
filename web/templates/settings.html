@@ -1,177 +1,140 @@
 {% extends "base.html" %}
 {% block title %}系統設定 - Kepware Monitor{% endblock %}
 {% block nav_settings %}active{% endblock %}
+{% block page_title %}系統設定{% endblock %}
+{% block crumbs %}home / settings{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h4 class="mb-0"><i class="bi bi-gear"></i> 系統設定</h4>
-    <button class="btn btn-primary btn-sm" onclick="saveSettings()">
-        <i class="bi bi-save"></i> 儲存
-    </button>
+<div class="section-hd">
+    <h2>系統設定</h2>
+    <div class="actions">
+        <button class="btn btn-primary" onclick="saveSettings()"><i data-lucide="save"></i>儲存</button>
+    </div>
 </div>
 
-<div id="saveAlert" class="alert d-none mb-3"></div>
+<div id="saveAlert" class="alert-banner"></div>
 
 <div id="settingsContainer">
-    <div class="text-center text-muted">載入中...</div>
+    <div class="text-center text-muted" style="padding:40px;">載入中...</div>
 </div>
 
-<div class="mt-2 text-muted small">
-    注意: 部分設定（如 OPC 連線、Web UI Port）需要重啟程式才會生效
-</div>
+<div class="form-hint">注意: 部分設定（如 OPC 連線、Web UI Port）需要重啟程式才會生效</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-let settingsData = {};
+var settingsData = {};
+
+var sectionIcons = {
+    'OPC': 'plug', 'Mail': 'mail', 'Monitor': 'timer', 'Tags': 'file-spreadsheet',
+    'Database': 'database', 'Log': 'file-text', 'WebUI': 'globe', 'Webhook': 'send',
+};
 
 loadSettings();
 
 function loadSettings() {
     fetch('/api/settings')
-        .then(r => r.json())
-        .then(data => {
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
             settingsData = data.sections || {};
             renderSettings();
         });
 }
 
 function renderSettings() {
-    const container = document.getElementById('settingsContainer');
-    let html = '';
+    var container = document.getElementById('settingsContainer');
+    var html = '';
 
-    const sectionIcons = {
-        'OPC': 'bi-plug',
-        'Mail': 'bi-envelope',
-        'Monitor': 'bi-stopwatch',
-        'Tags': 'bi-file-earmark-spreadsheet',
-        'Database': 'bi-database',
-        'Log': 'bi-journal-text',
-        'WebUI': 'bi-globe',
-        'Webhook': 'bi-send',
-    };
-
-    for (const [section, kvs] of Object.entries(settingsData)) {
-        const icon = sectionIcons[section] || 'bi-folder';
-        const webhookBtn = section === 'Webhook'
-            ? ' <button class="btn btn-outline-primary btn-sm ms-2" onclick="testWebhook()"><i class="bi bi-send-check"></i> 測試推播</button>'
+    for (var section in settingsData) {
+        var kvs = settingsData[section];
+        var icon = sectionIcons[section] || 'folder';
+        var webhookBtn = section === 'Webhook'
+            ? ' <button class="btn btn-outline btn-sm" onclick="testWebhook()"><i data-lucide="send"></i>測試推播</button>'
             : '';
-        html += `
-            <div class="card mb-3">
-                <div class="card-header d-flex align-items-center">
-                    <span><i class="bi ${icon}"></i> [${section}]</span>${webhookBtn}
-                </div>
-                <div class="card-body">`;
 
-        for (const [key, value] of Object.entries(kvs)) {
-            const inputType = value === '********' ? 'password' : 'text';
-            const isMultiline = value.length > 60 || value.includes('\n');
+        html += '<div class="settings-section">';
+        html += '<div class="settings-section-hd"><i data-lucide="' + icon + '"></i><span class="t">[' + section + ']</span><span style="flex:1;"></span>' + webhookBtn + '</div>';
+        html += '<div class="settings-section-body">';
 
+        for (var key in kvs) {
+            var value = kvs[key];
+            var inputType = value === '********' ? 'password' : 'text';
+            var isMultiline = value.length > 60 || value.indexOf('\n') >= 0;
+
+            html += '<div class="settings-row">';
+            html += '<label>' + key + '</label>';
             if (isMultiline) {
-                html += `
-                    <div class="row mb-2 align-items-start">
-                        <label class="col-sm-3 col-form-label small fw-bold">${key}</label>
-                        <div class="col-sm-9">
-                            <textarea class="form-control form-control-sm" rows="3"
-                                data-section="${section}" data-key="${key}">${escapeHtml(value)}</textarea>
-                        </div>
-                    </div>`;
+                html += '<textarea rows="3" data-section="' + section + '" data-key="' + key + '">' + escapeHtml(value) + '</textarea>';
             } else {
-                html += `
-                    <div class="row mb-2 align-items-center">
-                        <label class="col-sm-3 col-form-label small fw-bold">${key}</label>
-                        <div class="col-sm-9">
-                            <input type="${inputType}" class="form-control form-control-sm"
-                                value="${escapeHtml(value)}"
-                                data-section="${section}" data-key="${key}">
-                        </div>
-                    </div>`;
+                html += '<input type="' + inputType + '" class="input" value="' + escapeHtml(value) + '" data-section="' + section + '" data-key="' + key + '">';
             }
+            html += '</div>';
         }
 
         html += '</div></div>';
     }
 
     container.innerHTML = html;
+    reinitIcons();
 }
 
 function saveSettings() {
-    // 收集所有欄位值
-    const sections = {};
-    document.querySelectorAll('[data-section]').forEach(el => {
-        const section = el.dataset.section;
-        const key = el.dataset.key;
+    var sections = {};
+    document.querySelectorAll('[data-section]').forEach(function(el) {
+        var section = el.dataset.section;
+        var key = el.dataset.key;
         if (!sections[section]) sections[section] = {};
         sections[section][key] = el.value;
     });
 
-    const alertEl = document.getElementById('saveAlert');
-    alertEl.className = 'alert alert-info mb-3';
-    alertEl.textContent = '儲存中...';
-    alertEl.classList.remove('d-none');
+    showPageAlert('saveAlert', 'info', '儲存中...');
 
     fetch('/api/settings', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         credentials: 'same-origin',
-        body: JSON.stringify({sections}),
+        body: JSON.stringify({sections: sections}),
     })
-    .then(r => {
+    .then(function(r) {
         if (r.redirected || r.status === 401) {
             window.location.href = '/login';
             throw new Error('session expired');
         }
         return r.json();
     })
-    .then(data => {
+    .then(function(data) {
         if (data.ok) {
-            alertEl.className = 'alert alert-success mb-3';
-            alertEl.textContent = data.message || '儲存成功';
+            showPageAlert('saveAlert', 'ok', data.message || '儲存成功');
         } else {
-            alertEl.className = 'alert alert-danger mb-3';
-            alertEl.textContent = '儲存失敗: ' + (data.error || '未知錯誤');
+            showPageAlert('saveAlert', 'err', '儲存失敗: ' + (data.error || '未知錯誤'));
         }
-        setTimeout(() => alertEl.classList.add('d-none'), 5000);
     })
-    .catch(err => {
+    .catch(function(err) {
         if (err.message === 'session expired') return;
-        alertEl.className = 'alert alert-danger mb-3';
-        alertEl.textContent = '儲存失敗: ' + err;
+        showPageAlert('saveAlert', 'err', '儲存失敗: ' + err);
     });
 }
 
 function testWebhook() {
-    const alertEl = document.getElementById('saveAlert');
-    alertEl.className = 'alert alert-info mb-3';
-    alertEl.textContent = 'Webhook 測試中...';
-    alertEl.classList.remove('d-none');
+    showPageAlert('saveAlert', 'info', 'Webhook 測試中...');
 
     fetch('/api/webhook/test', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         credentials: 'same-origin',
     })
-    .then(r => r.json())
-    .then(data => {
-        if (data.ok) {
-            alertEl.className = 'alert alert-success mb-3';
-        } else {
-            alertEl.className = 'alert alert-warning mb-3';
-        }
-        alertEl.innerHTML = '<strong>' + (data.ok ? 'Webhook 測試成功' : 'Webhook 測試失敗') +
-            '</strong><pre class="mt-2 mb-0" style="white-space:pre-wrap;font-size:0.8em;">' +
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        var el = document.getElementById('saveAlert');
+        var type = data.ok ? 'ok' : 'warn';
+        el.className = 'alert-banner a-' + type + ' show';
+        el.innerHTML = '<strong>' + (data.ok ? 'Webhook 測試成功' : 'Webhook 測試失敗') +
+            '</strong><pre style="white-space:pre-wrap;font-size:12px;margin-top:8px;color:var(--fg-2);font-family:var(--font-mono);">' +
             escapeHtml(data.detail || '') + '</pre>';
     })
-    .catch(err => {
-        alertEl.className = 'alert alert-danger mb-3';
-        alertEl.textContent = 'Webhook 測試錯誤: ' + err;
+    .catch(function(err) {
+        showPageAlert('saveAlert', 'err', 'Webhook 測試錯誤: ' + err);
     });
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML.replace(/"/g, '&quot;');
 }
 </script>
 {% endblock %}
