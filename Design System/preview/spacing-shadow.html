@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><link rel="stylesheet" href="_shell.css"><title>Shadows &amp; Glow</title>
+<style>
+.grid { display:grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.tile { height: 110px; background: var(--bg-2); border-radius: 10px; display:flex; flex-direction:column; justify-content:flex-end; padding: 12px 14px; font-size: 12px; color: var(--fg-2); border: 1px solid var(--border-1); }
+.tile strong { color: var(--fg-1); font-weight: 700; font-size: 13px; display:block; margin-bottom: 2px; }
+</style></head>
+<body><div class="card">
+  <div class="cap" style="margin-bottom:12px">Elevation &amp; glow system</div>
+  <div class="grid">
+    <div class="tile" style="box-shadow: 0 1px 2px rgba(0,0,0,0.4)"><strong>shadow-sm</strong>subtle divider lift</div>
+    <div class="tile" style="box-shadow: 0 2px 6px rgba(0,0,0,0.45), 0 1px 2px rgba(0,0,0,0.3)"><strong>shadow-1</strong>resting card</div>
+    <div class="tile" style="box-shadow: 0 8px 24px rgba(0,0,0,0.5), 0 2px 6px rgba(0,0,0,0.3)"><strong>shadow-2</strong>hover / popover</div>
+    <div class="tile" style="box-shadow: 0 16px 40px rgba(0,0,0,0.6)"><strong>shadow-3</strong>modal overlay</div>
+    <div class="tile" style="box-shadow: 0 0 0 1px rgba(34,211,238,0.25), 0 0 20px rgba(34,211,238,0.15); border-color: rgba(34,211,238,0.3)"><strong style="color:#22d3ee">glow-accent</strong>active / live</div>
+    <div class="tile" style="box-shadow: 0 0 0 1px rgba(59,130,246,0.3), 0 0 16px rgba(59,130,246,0.2); border-color: rgba(59,130,246,0.3)"><strong style="color:#60a5fa">glow-blue</strong>focused action</div>
+  </div>
+</div></body></html>

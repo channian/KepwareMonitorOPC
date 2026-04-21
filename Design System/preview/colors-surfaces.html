@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><link rel="stylesheet" href="_shell.css"><title>Colors — Surfaces</title>
+<style>
+.swatch { height: 64px; border-radius: 8px; display:flex; align-items:flex-end; padding: 8px 10px; font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); }
+.swatch .name { color: var(--fg-1); font-weight: 600; }
+.grid-surf { display:grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+</style></head>
+<body><div class="card">
+  <div class="cap" style="margin-bottom:12px">Surface stack — layered near-black to elevated slate</div>
+  <div class="grid-surf">
+    <div class="swatch" style="background:#05070d; border:1px solid #0f172a"><div><div class="name">bg-0</div>#05070d</div></div>
+    <div class="swatch" style="background:#0a0f1a; border:1px solid #172033"><div><div class="name">bg-1</div>#0a0f1a</div></div>
+    <div class="swatch" style="background:#0f172a; border:1px solid #1e293b"><div><div class="name">bg-2</div>#0f172a</div></div>
+    <div class="swatch" style="background:#172033; border:1px solid #293548"><div><div class="name">bg-3</div>#172033</div></div>
+    <div class="swatch" style="background:#1e293b; border:1px solid #334155"><div><div class="name">bg-4</div>#1e293b</div></div>
+  </div>
+  <div style="font-size:12px; color:var(--fg-2); margin-top:10px">page → container → card → input · hover step up one</div>
+</div></body></html>

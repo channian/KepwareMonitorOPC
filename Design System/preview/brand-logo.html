@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><link rel="stylesheet" href="_shell.css"><title>Logo &amp; Monogram</title>
+<style>
+.grid { display:grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items:center; }
+.block { background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 28px; display:flex; align-items:center; justify-content:center; min-height: 160px; }
+.block.dk { background: #05070d; }
+.block.lt { background: #e6edf7; border-color: #cbd5e1; }
+.lbl { font-size: 11px; color: #94a3b8; text-transform:uppercase; letter-spacing: 0.08em; font-weight:600; margin-top: 8px; font-family: var(--font-mono); }
+@keyframes ds-pulse-logo { 0%,100% { opacity:1 } 50% { opacity:0.4 } }
+.pulse-dot { animation: ds-pulse-logo 1.6s ease-in-out infinite; transform-origin: center; }
+</style></head>
+<body><div class="card">
+  <div class="cap" style="margin-bottom:12px">Brand mark · KPM monogram · pulsing cyan beacon</div>
+  <div class="grid">
+    <div>
+      <div class="block dk">
+        <svg viewBox="0 0 64 64" width="120" height="120" fill="none">
+          <rect x="2" y="2" width="60" height="60" rx="14" fill="#0f172a" stroke="#22d3ee" stroke-opacity="0.35" stroke-width="1.5"/>
+          <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#g1)" opacity="0.35"/>
+          <text x="32" y="40" text-anchor="middle" font-family="Inter, sans-serif" font-weight="800" font-size="20" fill="#e6edf7" letter-spacing="-0.02em">KPM</text>
+          <circle class="pulse-dot" cx="50" cy="50" r="4" fill="#22d3ee"/>
+          <circle cx="50" cy="50" r="7" fill="none" stroke="#22d3ee" stroke-opacity="0.4" stroke-width="1"/>
+          <defs><radialGradient id="g1" cx="0.8" cy="0.2" r="0.9"><stop offset="0" stop-color="#22d3ee" stop-opacity="0.5"/><stop offset="1" stop-color="#0f172a" stop-opacity="0"/></radialGradient></defs>
+        </svg>
+      </div>
+      <div class="lbl">monogram · dark surface</div>
+    </div>
+    <div>
+      <div class="block dk" style="justify-content:flex-start; padding-left:32px">
+        <svg viewBox="0 0 200 64" width="240" height="76" fill="none">
+          <rect x="4" y="12" width="40" height="40" rx="10" fill="#0f172a" stroke="#22d3ee" stroke-opacity="0.35" stroke-width="1.25"/>
+          <rect x="4" y="12" width="40" height="40" rx="10" fill="url(#g2)" opacity="0.35"/>
+          <text x="24" y="37" text-anchor="middle" font-family="Inter, sans-serif" font-weight="800" font-size="13" fill="#e6edf7" letter-spacing="-0.02em">KPM</text>
+          <circle class="pulse-dot" cx="36" cy="44" r="2.5" fill="#22d3ee"/>
+          <text x="58" y="34" font-family="Inter, sans-serif" font-weight="700" font-size="16" fill="#e6edf7" letter-spacing="-0.01em">Kepware</text>
+          <text x="58" y="50" font-family="Inter, sans-serif" font-weight="500" font-size="11" fill="#22d3ee" letter-spacing="2" >MONITOR</text>
+          <defs><radialGradient id="g2" cx="0.8" cy="0.2" r="0.9"><stop offset="0" stop-color="#22d3ee" stop-opacity="0.5"/><stop offset="1" stop-color="#0f172a" stop-opacity="0"/></radialGradient></defs>
+        </svg>
+      </div>
+      <div class="lbl">horizontal lockup · nav / header</div>
+    </div>
+  </div>
+</div></body></html>

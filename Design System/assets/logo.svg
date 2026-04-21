@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none">
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#0f172a" stroke="#22d3ee" stroke-opacity="0.35" stroke-width="1.5"></rect>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#kpmGlow)" opacity="0.35"></rect>
+  <text x="32" y="40" text-anchor="middle" font-family="Inter, &#39;Segoe UI&#39;, system-ui, sans-serif" font-weight="800" font-size="20" fill="#e6edf7" letter-spacing="-0.02em">KPM</text>
+  <circle cx="50" cy="50" r="4" fill="#22d3ee"></circle>
+  <circle cx="50" cy="50" r="7" fill="none" stroke="#22d3ee" stroke-opacity="0.4" stroke-width="1"></circle>
+  <defs>
+    <radialGradient id="kpmGlow" cx="0.8" cy="0.2" r="0.9">
+      <stop offset="0" stop-color="#22d3ee" stop-opacity="0.5"></stop>
+      <stop offset="1" stop-color="#0f172a" stop-opacity="0"></stop>
+    </radialGradient>
+  </defs>
+</svg>

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><link rel="stylesheet" href="_shell.css"><title>Progress &amp; Log</title>
+<style>
+.pbar { width:100%; height: 28px; background:#172033; border-radius: 14px; position:relative; overflow:hidden; margin-bottom: 12px; border:1px solid #1e293b;}
+.pfill { height: 100%; background: linear-gradient(90deg, #22d3ee, #3b82f6); border-radius: 14px; position: relative; overflow: hidden; transition: width 400ms ease; }
+.pfill::after { content:''; position:absolute; inset:0; background: repeating-linear-gradient(45deg, transparent, transparent 8px, rgba(255,255,255,0.1) 8px, rgba(255,255,255,0.1) 16px); animation: stripe 0.8s linear infinite; }
+@keyframes stripe { to { background-position: 32px 0 } }
+.ptext { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-family: var(--font-mono); font-size:12px; font-weight:700; color:#e6edf7; text-shadow: 0 1px 2px rgba(0,0,0,0.8); z-index:1; }
+.log { background: #05070d; color:#cbd5e1; border-radius:8px; padding: 12px 16px; font-family: var(--font-mono); font-size:12px; line-height: 1.8; border:1px solid #1e293b; }
+.log-info { color:#7dd3fc; }
+.log-ok { color:#86efac; }
+.log-warn { color:#fde68a; }
+.log-err { color:#fca5a5; }
+.t { color:#475569; }
+</style></head>
+<body><div class="card">
+  <div class="cap" style="margin-bottom:10px">Progress bar + streaming log</div>
+  <div class="pbar"><div class="pfill" style="width:64%"></div><span class="ptext">128 / 200</span></div>
+  <div class="log">
+    <div><span class="t">14:32:07</span> <span class="log-info">[kepware_a]</span> 讀取 142 個點位 …</div>
+    <div><span class="t">14:32:08</span> <span class="log-ok">[OK]</span> iFIX1_SecondError = 12</div>
+    <div><span class="t">14:32:08</span> <span class="log-warn">[WARN]</span> iFIX2_SecondError = 58 (counter 2/3)</div>
+    <div><span class="t">14:32:09</span> <span class="log-err">[ALERT]</span> iFIX3_SecondError 觸發異常 &gt; 60s</div>
+    <div><span class="t">14:32:09</span> <span class="log-err">[L3]</span> iFIX/IGS 機台 10.0.1.20 無法連線 (Ping 失敗)</div>
+    <div><span class="t">14:32:10</span> <span class="log-info">&gt;&gt;&gt; 寄送信件:</span> [異常] Kepware 設備監控通知 - iFIX3_SecondError</div>
+  </div>
+</div></body></html>

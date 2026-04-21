@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><link rel="stylesheet" href="_shell.css"><title>Tabs &amp; Nav</title>
+<style>
+.tabs { display:flex; gap: 4px; border-bottom: 1px solid #1e293b; margin-bottom: 14px; }
+.tab { padding: 12px 16px; font-size: 14px; font-weight: 600; color: #64748b; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; display:inline-flex; align-items:center; gap: 7px; transition: all 160ms; }
+.tab:hover { color: #e6edf7; background: rgba(34,211,238,0.05); }
+.tab.active { color: #22d3ee; border-bottom-color: #22d3ee; }
+.tab svg { width: 16px; height: 16px; }
+.subtabs { display:flex; gap: 6px; }
+.st { padding: 6px 14px; font-size: 12px; font-weight: 600; color: #94a3b8; border: 1px solid #293548; border-radius: 999px; cursor: pointer; font-family: var(--font-mono); letter-spacing: 0.04em; }
+.st.active { background: #22d3ee; color:#03181c; border-color: #22d3ee; }
+.st:hover:not(.active) { color:#22d3ee; border-color:#22d3ee; }
+</style></head>
+<body><div class="card">
+  <div class="cap" style="margin-bottom:10px">Tabs (primary) + Subtabs (pills)</div>
+  <div class="tabs">
+    <div class="tab active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>Overview</div>
+    <div class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg>Channels</div>
+    <div class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>Tags</div>
+    <div class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>History</div>
+  </div>
+  <div class="subtabs">
+    <div class="st active">ALL</div>
+    <div class="st">HOST_DOWN</div>
+    <div class="st">OPC_SERVICE_DOWN</div>
+    <div class="st">DEVICE_DOWN</div>
+    <div class="st">VALUE_ABNORMAL</div>
+  </div>
+</div></body></html>

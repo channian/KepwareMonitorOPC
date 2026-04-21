@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><link rel="stylesheet" href="_shell.css"><title>Colors — Accent</title>
+<style>
+.sw { height: 72px; border-radius: 8px; display:flex; align-items:flex-end; padding: 10px 12px; font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); position:relative; overflow:hidden; }
+.sw .name { color: #fff; font-weight: 700; font-size: 12px; letter-spacing: 0.04em; text-transform:uppercase; }
+.grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.sub { display:grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top:12px; }
+.sub div { height: 36px; border-radius: 6px; display:flex; align-items:center; justify-content:center; font-family: var(--font-mono); font-size:11px; }
+</style></head>
+<body><div class="card">
+  <div class="cap" style="margin-bottom:10px">Primary accents — cyan (accent) &amp; blue (action)</div>
+  <div class="grid2">
+    <div>
+      <div class="sw" style="background:#22d3ee; box-shadow: 0 0 24px rgba(34,211,238,0.5)"><div><div class="name" style="color:#03181c">Accent</div><span style="color:#03181c">#22d3ee</span></div></div>
+      <div class="sub">
+        <div style="background:rgba(34,211,238,0.12); color:#22d3ee">soft</div>
+        <div style="background:#06b6d4; color:#fff">hover</div>
+        <div style="background:transparent; border:1px solid #22d3ee; color:#22d3ee">ring</div>
+      </div>
+    </div>
+    <div>
+      <div class="sw" style="background:#3b82f6; box-shadow: 0 0 24px rgba(59,130,246,0.45)"><div><div class="name">Blue</div><span style="color:#e6edf7">#3b82f6</span></div></div>
+      <div class="sub">
+        <div style="background:rgba(59,130,246,0.12); color:#60a5fa">soft</div>
+        <div style="background:#2563eb; color:#fff">hover</div>
+        <div style="background:transparent; border:1px solid #3b82f6; color:#60a5fa">ring</div>
+      </div>
+    </div>
+  </div>
+</div></body></html>

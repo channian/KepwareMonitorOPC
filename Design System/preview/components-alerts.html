@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><link rel="stylesheet" href="_shell.css"><title>Alerts &amp; Modals</title>
+<style>
+.alert { padding: 12px 16px; border-radius: 8px; font-size: 13px; display:flex; gap:10px; align-items:flex-start; margin-bottom: 12px; line-height: 1.55; }
+.a-warn { background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.3); border-left: 3px solid #f59e0b; color:#fde68a; }
+.a-err  { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.3); border-left: 3px solid #ef4444; color:#fecaca; }
+.a-ok   { background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.3); border-left: 3px solid #22c55e; color:#86efac; }
+.a-info { background: rgba(96,165,250,0.08); border: 1px solid rgba(96,165,250,0.3); border-left: 3px solid #60a5fa; color:#bfdbfe; }
+.alert svg { width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px; }
+.alert strong { color: inherit; font-weight: 700; }
+.modal { background: #0f172a; border: 1px solid #293548; border-radius: 12px; padding: 20px 24px; box-shadow: 0 16px 40px rgba(0,0,0,0.6); max-width: 420px; }
+.modal h3 { color:#e6edf7; font-size:16px; font-weight:700; margin-bottom:6px; }
+.modal p { color:#94a3b8; font-size:13px; margin-bottom:16px; }
+.modal-actions { display:flex; gap:10px; justify-content:flex-end; }
+.btn-s { padding: 7px 14px; border-radius: 6px; font-size: 13px; font-weight:600; border:none; cursor:pointer; font-family: inherit;}
+</style></head>
+<body><div class="card">
+  <div class="cap" style="margin-bottom:10px">Inline alerts + confirm modal</div>
+  <div class="alert a-err"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><div><strong>連線異常</strong> — Kepware 主機 192.168.1.10 無法連線 (Ping 失敗)</div></div>
+  <div class="alert a-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>LIVE 模式，執行後將真的新增裝置到 Kepware！</div>
+  <div class="alert a-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>CSV 重載成功，共 142 個監控項目</div>
+  <div class="modal" style="margin-top:6px">
+    <h3>確認刪除 3 個點位</h3>
+    <p>此操作會從 Config/tags.csv 移除選取項目，刪除後無法復原。</p>
+    <div class="modal-actions">
+      <button class="btn-s" style="background:transparent; color:#94a3b8; border:1.5px solid #293548">取消</button>
+      <button class="btn-s" style="background:#ef4444; color:#fff">確認刪除</button>
+    </div>
+  </div>
+</div></body></html>
