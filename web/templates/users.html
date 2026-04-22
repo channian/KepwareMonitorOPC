@@ -140,13 +140,17 @@ function loadUsers() {
                         '<td class="td-mono">' + (u.created_at || '') + '</td>' +
                         '<td class="td-mono">' + (u.last_login || '-') + '</td>' +
                         '<td class="d-flex gap-2">' +
-                            '<button class="btn btn-ghost btn-xs" onclick="editUser(' + u.id + ',\'' + u.username + '\',\'' + (u.display_name || '') + '\',\'' + u.role + '\')"><i data-lucide="pencil"></i></button>' +
-                            (u.username !== 'admin' ? '<button class="btn btn-danger btn-xs" onclick="deleteUser(' + u.id + ',\'' + u.username + '\')"><i data-lucide="trash-2"></i></button>' : '') +
+                            '<button class="btn btn-ghost btn-xs" title="編輯" onclick="editUser(' + u.id + ',\'' + u.username + '\',\'' + (u.display_name || '').replace(/'/g, "\\'") + '\',\'' + u.role + '\')"><i data-lucide="pencil"></i>編輯</button>' +
+                            (u.username !== 'admin' ? '<button class="btn btn-danger btn-xs" title="刪除" onclick="deleteUser(' + u.id + ',\'' + u.username + '\')"><i data-lucide="trash-2"></i>刪除</button>' : '') +
                         '</td>' +
                     '</tr>';
             }
             tbody.innerHTML = html;
             reinitIcons();
+        })
+        .catch(function(err) {
+            document.getElementById('usersBody').innerHTML =
+                '<tr><td colspan="7" class="text-center text-err">載入失敗: ' + err + '</td></tr>';
         });
 }
 

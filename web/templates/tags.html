@@ -70,6 +70,10 @@ function loadTags() {
             tagRows = data.rows || [];
             currentPage = 1;
             renderTable();
+        })
+        .catch(function(err) {
+            document.getElementById('tagsBody').innerHTML =
+                '<tr><td colspan="2" class="text-center text-err">載入失敗: ' + err + '</td></tr>';
         });
 }
 

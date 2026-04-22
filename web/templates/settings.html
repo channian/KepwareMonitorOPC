@@ -38,6 +38,10 @@ function loadSettings() {
         .then(function(data) {
             settingsData = data.sections || {};
             renderSettings();
+        })
+        .catch(function(err) {
+            document.getElementById('settingsContainer').innerHTML =
+                '<div class="text-center text-err" style="padding:40px;">載入失敗: ' + err + '</div>';
         });
 }
 
