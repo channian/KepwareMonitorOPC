@@ -37,6 +37,9 @@
 
             {% if user and user.role == 'admin' %}
             <div class="nav-section">SYSTEM</div>
+            <a href="/kepware-events" class="nav-item {% block nav_kepware %}{% endblock %}">
+                <i data-lucide="activity"></i><span>Kepware 事件</span>
+            </a>
             <a href="/tags" class="nav-item {% block nav_tags %}{% endblock %}">
                 <i data-lucide="tag"></i><span>Tags 管理</span>
             </a>

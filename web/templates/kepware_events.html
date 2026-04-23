@@ -1,0 +1,295 @@
+{% extends "base.html" %}
+{% block title %}Kepware 事件 - Kepware Monitor{% endblock %}
+{% block nav_kepware %}active{% endblock %}
+{% block page_title %}Kepware 事件監控{% endblock %}
+{% block crumbs %}home / kepware events{% endblock %}
+
+{% block content %}
+<!-- Health status -->
+<div id="healthCards" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px;"></div>
+
+<!-- Tabs -->
+<div class="ctabs">
+    <div class="ctab active" onclick="switchTab('events')">事件記錄</div>
+    <div class="ctab" onclick="switchTab('transactions')">操作記錄</div>
+</div>
+
+<!-- Events Tab -->
+<div id="tabEvents">
+    <div class="section-hd">
+        <h2>事件記錄</h2>
+        <span class="count" id="eventCount">—</span>
+    </div>
+
+    <div class="card-ui mb-4">
+        <form class="form-row form-row-5" style="margin-bottom:0;" onsubmit="loadEvents(); return false;">
+            <div>
+                <label class="form-label">開始日期</label>
+                <input type="date" class="input w-full" id="evStartDate">
+            </div>
+            <div>
+                <label class="form-label">結束日期</label>
+                <input type="date" class="input w-full" id="evEndDate">
+            </div>
+            <div>
+                <label class="form-label">Channel</label>
+                <input type="text" class="input w-full input-sans" id="evChannel" placeholder="全部">
+            </div>
+            <div>
+                <label class="form-label">事件等級</label>
+                <select class="select w-full" id="evType">
+                    <option value="">全部</option>
+                    <option value="Error">Error</option>
+                    <option value="Warning">Warning</option>
+                    <option value="Info">Info</option>
+                </select>
+            </div>
+            <div style="display:flex;align-items:flex-end;">
+                <button type="submit" class="btn btn-primary"><i data-lucide="search"></i>查詢</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="card-ui">
+        <div class="tbl-wrap max-h-70vh">
+            <table>
+                <thead>
+                    <tr>
+                        <th>狀態</th>
+                        <th>時間</th>
+                        <th>等級</th>
+                        <th>來源</th>
+                        <th>Channel</th>
+                        <th>Device</th>
+                        <th>訊息</th>
+                        <th>告警類型</th>
+                    </tr>
+                </thead>
+                <tbody id="eventsBody">
+                    <tr><td colspan="8" class="text-center text-muted">請按查詢</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Transactions Tab -->
+<div id="tabTransactions" style="display:none;">
+    <div class="section-hd">
+        <h2>操作記錄</h2>
+        <span class="count" id="txCount">—</span>
+    </div>
+
+    <div class="card-ui mb-4">
+        <form class="form-row form-row-4" style="margin-bottom:0;" onsubmit="loadTransactions(); return false;">
+            <div>
+                <label class="form-label">開始日期</label>
+                <input type="date" class="input w-full" id="txStartDate">
+            </div>
+            <div>
+                <label class="form-label">結束日期</label>
+                <input type="date" class="input w-full" id="txEndDate">
+            </div>
+            <div>
+                <label class="form-label">操作類型</label>
+                <select class="select w-full" id="txAction">
+                    <option value="">全部</option>
+                    <option value="GET">GET</option>
+                    <option value="POST">POST</option>
+                    <option value="PUT">PUT</option>
+                    <option value="DELETE">DELETE</option>
+                </select>
+            </div>
+            <div style="display:flex;align-items:flex-end;">
+                <button type="submit" class="btn btn-primary"><i data-lucide="search"></i>查詢</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="card-ui">
+        <div class="tbl-wrap max-h-70vh">
+            <table>
+                <thead>
+                    <tr>
+                        <th>狀態</th>
+                        <th>時間</th>
+                        <th>操作者</th>
+                        <th>方法</th>
+                        <th>端點</th>
+                        <th>來源 IP</th>
+                        <th>回應碼</th>
+                    </tr>
+                </thead>
+                <tbody id="txBody">
+                    <tr><td colspan="7" class="text-center text-muted">請按查詢</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+var today = new Date().toISOString().split('T')[0];
+document.getElementById('evEndDate').value = today;
+document.getElementById('txEndDate').value = today;
+
+loadHealth();
+
+function switchTab(tab) {
+    var tabs = document.querySelectorAll('.ctab');
+    for (var i = 0; i < tabs.length; i++) tabs[i].classList.remove('active');
+
+    if (tab === 'events') {
+        tabs[0].classList.add('active');
+        document.getElementById('tabEvents').style.display = '';
+        document.getElementById('tabTransactions').style.display = 'none';
+    } else {
+        tabs[1].classList.add('active');
+        document.getElementById('tabEvents').style.display = 'none';
+        document.getElementById('tabTransactions').style.display = '';
+    }
+}
+
+function loadHealth() {
+    fetch('/api/kepware/health')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var div = document.getElementById('healthCards');
+            if (!data.enabled) {
+                div.innerHTML =
+                    '<div class="card-ui" style="padding:12px 16px;display:flex;align-items:center;gap:10px;">' +
+                        '<span class="dot-inline dot-muted"></span>' +
+                        '<span style="font-weight:600;">Kepware Log</span>' +
+                        '<span class="pill p-muted"><span class="dot"></span>未啟用</span>' +
+                    '</div>';
+                return;
+            }
+            var h = data.health;
+            if (!h) {
+                div.innerHTML =
+                    '<div class="card-ui" style="padding:12px 16px;display:flex;align-items:center;gap:10px;">' +
+                        '<span class="dot-inline dot-err"></span>' +
+                        '<span style="font-weight:600;">Kepware API</span>' +
+                        '<span class="pill p-err"><span class="dot"></span>連線失敗</span>' +
+                        '<span class="td-mono" style="font-size:11px;color:var(--fg-3);">' + (data.error || '') + '</span>' +
+                    '</div>';
+                return;
+            }
+            var configOk = h.config_api_connected;
+            var opcOk = h.opcua_connected;
+            div.innerHTML =
+                '<div class="card-ui" style="padding:12px 16px;display:flex;align-items:center;gap:10px;">' +
+                    '<span class="dot-inline dot-' + (configOk ? 'ok' : 'err') + '"></span>' +
+                    '<span style="font-weight:600;">Config API</span>' +
+                    '<span class="pill p-' + (configOk ? 'ok' : 'err') + '"><span class="dot"></span>' + (configOk ? 'CONNECTED' : 'DISCONNECTED') + '</span>' +
+                '</div>' +
+                '<div class="card-ui" style="padding:12px 16px;display:flex;align-items:center;gap:10px;">' +
+                    '<span class="dot-inline dot-' + (opcOk ? 'ok' : 'err') + '"></span>' +
+                    '<span style="font-weight:600;">OPC UA</span>' +
+                    '<span class="pill p-' + (opcOk ? 'ok' : 'err') + '"><span class="dot"></span>' + (opcOk ? 'CONNECTED' : 'DISCONNECTED') + '</span>' +
+                '</div>';
+            reinitIcons();
+        })
+        .catch(function() {});
+}
+
+function loadEvents() {
+    var params = new URLSearchParams();
+    var sd = document.getElementById('evStartDate').value;
+    var ed = document.getElementById('evEndDate').value;
+    var ch = document.getElementById('evChannel').value.trim();
+    var et = document.getElementById('evType').value;
+    if (sd) params.set('start_date', sd);
+    if (ed) params.set('end_date', ed);
+    if (ch) params.set('channel', ch);
+    if (et) params.set('event_type', et);
+
+    fetch('/api/kepware/events?' + params)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var rows = data.data || [];
+            document.getElementById('eventCount').textContent = rows.length + ' 筆';
+
+            if (rows.length === 0) {
+                document.getElementById('eventsBody').innerHTML =
+                    '<tr><td colspan="8" class="text-center text-muted">無資料</td></tr>';
+                return;
+            }
+
+            var html = '';
+            for (var i = 0; i < rows.length; i++) {
+                var r = rows[i];
+                var evClass = r.event === 'Error' ? 'err' : r.event === 'Warning' ? 'warn' : 'info';
+                var dotClass = r.is_alert ? 'dot-err' : (r.event === 'Warning' ? 'dot-warn' : 'dot-ok');
+
+                html +=
+                    '<tr' + (r.is_alert ? ' style="background:var(--err-bg);"' : '') + '>' +
+                        '<td class="text-center"><span class="dot-inline ' + dotClass + '"></span></td>' +
+                        '<td class="td-mono nowrap">' + r.timestamp + '</td>' +
+                        '<td><span class="pill p-' + evClass + '"><span class="dot"></span>' + r.event + '</span></td>' +
+                        '<td class="td-mono">' + (r.source || '') + '</td>' +
+                        '<td style="font-weight:600;">' + (r.channel || '-') + '</td>' +
+                        '<td>' + (r.device || '-') + '</td>' +
+                        '<td class="td-mono" style="font-size:11px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(r.message || '') + '</td>' +
+                        '<td>' + (r.alert_type ? '<span class="pill p-err"><span class="dot"></span>' + r.alert_type + '</span>' : '-') + '</td>' +
+                    '</tr>';
+            }
+            document.getElementById('eventsBody').innerHTML = html;
+        })
+        .catch(function(err) {
+            document.getElementById('eventsBody').innerHTML =
+                '<tr><td colspan="8" class="text-center text-err">查詢失敗: ' + err + '</td></tr>';
+        });
+}
+
+function loadTransactions() {
+    var params = new URLSearchParams();
+    var sd = document.getElementById('txStartDate').value;
+    var ed = document.getElementById('txEndDate').value;
+    var ac = document.getElementById('txAction').value;
+    if (sd) params.set('start_date', sd);
+    if (ed) params.set('end_date', ed);
+    if (ac) params.set('action', ac);
+
+    fetch('/api/kepware/transactions?' + params)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var rows = data.data || [];
+            document.getElementById('txCount').textContent = rows.length + ' 筆';
+
+            if (rows.length === 0) {
+                document.getElementById('txBody').innerHTML =
+                    '<tr><td colspan="7" class="text-center text-muted">無資料</td></tr>';
+                return;
+            }
+
+            var html = '';
+            for (var i = 0; i < rows.length; i++) {
+                var r = rows[i];
+                var isAlert = r.is_alert || r.action === 'DELETE';
+                var dotClass = isAlert ? 'dot-err' : (r.response >= 400 ? 'dot-warn' : 'dot-ok');
+                var actionClass = r.action === 'DELETE' ? 'p-err' : r.action === 'POST' ? 'p-warn' : r.action === 'PUT' ? 'p-info' : 'p-muted';
+                var respClass = r.response >= 400 ? 'text-err' : 'text-ok';
+
+                html +=
+                    '<tr' + (isAlert ? ' style="background:var(--err-bg);"' : '') + '>' +
+                        '<td class="text-center"><span class="dot-inline ' + dotClass + '"></span></td>' +
+                        '<td class="td-mono nowrap">' + r.timestamp + '</td>' +
+                        '<td style="font-weight:600;">' + (r.user || '') + '</td>' +
+                        '<td><span class="pill ' + actionClass + '"><span class="dot"></span>' + r.action + '</span></td>' +
+                        '<td class="td-mono" style="font-size:11px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(r.endpoint || '') + '</td>' +
+                        '<td class="td-mono">' + (r.source_ip || '') + '</td>' +
+                        '<td class="td-mono ' + respClass + '">' + r.response + '</td>' +
+                    '</tr>';
+            }
+            document.getElementById('txBody').innerHTML = html;
+        })
+        .catch(function(err) {
+            document.getElementById('txBody').innerHTML =
+                '<tr><td colspan="7" class="text-center text-err">查詢失敗: ' + err + '</td></tr>';
+        });
+}
+</script>
+{% endblock %}

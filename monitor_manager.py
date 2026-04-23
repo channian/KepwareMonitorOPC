@@ -11,6 +11,7 @@ from opc_connection import OPCConnection
 from db_service import DatabaseService
 from ase_email_service import EmailService
 from webhook_service import WebhookService
+from kepware_log_service import KepwareLogService
 
 
 def log_and_print(msg):
@@ -111,6 +112,9 @@ class MonitorManager:
         self.connections = {}  # name -> OPCConnection
         self._parse_servers()
 
+        # Kepware Log 監控
+        self.kepware_log = self._init_kepware_log()
+
         # 監控設備清單
         self.devices = []  # list of DeviceConfig
 
@@ -146,6 +150,24 @@ class MonitorManager:
             verify_ssl=verify_ssl,
             use_proxy=use_proxy,
             proxy_url=proxy_url or None,
+        )
+
+    def _init_kepware_log(self):
+        enable = self.config.getboolean("KepwareLog", "Enable", fallback=False)
+        if not enable:
+            logging.info("Kepware Log 監控未啟用")
+            return None
+
+        base_url = self.config.get("KepwareLog", "ApiBaseUrl", fallback="").strip()
+        if not base_url:
+            logging.warning("Kepware Log 設定不完整（缺少 ApiBaseUrl），已停用")
+            return None
+
+        return KepwareLogService(
+            config=self.config,
+            db_service=self.db,
+            email_service=self.email_service,
+            webhook_service=self.webhook,
         )
 
     def _parse_servers(self):
@@ -597,7 +619,8 @@ class MonitorManager:
             await conn.connect()
 
         # 清理舊 DB 紀錄
-        self.db.cleanup_old_records(days=90)
+        retention = self.config.getint("KepwareLog", "RetentionDays", fallback=90)
+        self.db.cleanup_old_records(days=retention)
 
         # 進入主迴圈
         logging.info("進入主監控迴圈...")
@@ -608,6 +631,7 @@ class MonitorManager:
         主監控迴圈 — 讀值與重連邏輯與舊版一致。
         """
         last_csv_check = 0
+        last_kepware_log_poll = 0
 
         while True:
             now = time.time()
@@ -669,6 +693,18 @@ class MonitorManager:
                         await self._process_device(device, raw_value, conn_name, current_ts)
                     except Exception as ex:
                         logging.exception(f"[{conn_name}] 處理設備 {device.name} 發生錯誤: {ex}")
+
+            # Kepware Log polling
+            if self.kepware_log:
+                kl_interval = self.kepware_log.poll_interval
+                if (now - last_kepware_log_poll) >= kl_interval:
+                    try:
+                        await asyncio.get_event_loop().run_in_executor(
+                            None, self.kepware_log.poll
+                        )
+                    except Exception as ex:
+                        logging.error(f"Kepware Log polling 錯誤: {ex}")
+                    last_kepware_log_poll = time.time()
 
             # 等待下一輪
             log_and_print(f"等待 {self.check_interval} 秒後更新...")

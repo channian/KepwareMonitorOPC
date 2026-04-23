@@ -629,3 +629,68 @@ async def api_change_password(request: Request):
 
     db_service.update_user(user["user_id"], password=new_pw)
     return JSONResponse({"ok": True})
+
+
+# ===========================================
+# Kepware Events / Transactions (admin)
+# ===========================================
+
+@app.get("/kepware-events", response_class=HTMLResponse)
+async def kepware_events_page(request: Request):
+    user, err = _admin_or_403(request)
+    if err:
+        return err
+    return templates.TemplateResponse("kepware_events.html", {
+        "request": request, "user": user,
+    })
+
+
+@app.get("/api/kepware/events")
+async def api_kepware_events(request: Request):
+    user, err = _admin_or_403(request)
+    if err:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    start_date = request.query_params.get("start_date")
+    end_date = request.query_params.get("end_date")
+    channel = request.query_params.get("channel")
+    event_type = request.query_params.get("event_type")
+
+    rows = db_service.query_kepware_events(
+        start_date=start_date, end_date=end_date,
+        channel=channel, event_type=event_type,
+    )
+    return JSONResponse({"data": rows})
+
+
+@app.get("/api/kepware/transactions")
+async def api_kepware_transactions(request: Request):
+    user, err = _admin_or_403(request)
+    if err:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    start_date = request.query_params.get("start_date")
+    end_date = request.query_params.get("end_date")
+    action = request.query_params.get("action")
+
+    rows = db_service.query_kepware_transactions(
+        start_date=start_date, end_date=end_date, action=action,
+    )
+    return JSONResponse({"data": rows})
+
+
+@app.get("/api/kepware/health")
+async def api_kepware_health(request: Request):
+    user, err = _admin_or_403(request)
+    if err:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    if not monitor_manager or not monitor_manager.kepware_log:
+        return JSONResponse({"enabled": False})
+
+    kl = monitor_manager.kepware_log
+    try:
+        data = kl._api_get("/api/health")
+        return JSONResponse({"enabled": True, "health": data})
+    except Exception as ex:
+        return JSONResponse({"enabled": True, "health": None, "error": str(ex)})

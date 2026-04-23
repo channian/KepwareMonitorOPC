@@ -15,6 +15,8 @@ class DatabaseService:
       - alert_log: 派報紀錄
       - users: 使用者帳號
       - webhook_log: Webhook 推播紀錄
+      - kepware_events: Kepware 事件記錄
+      - kepware_transactions: Kepware Config API 操作記錄
     """
 
     def __init__(self, db_path="data/monitor.db"):
@@ -84,6 +86,32 @@ class DatabaseService:
                     is_recovery INTEGER DEFAULT 0
                 );
 
+                CREATE TABLE IF NOT EXISTS kepware_events (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp   TEXT NOT NULL,
+                    event       TEXT,
+                    source      TEXT,
+                    channel     TEXT,
+                    device      TEXT,
+                    message     TEXT,
+                    dedup_hash  TEXT,
+                    is_alert    INTEGER DEFAULT 0,
+                    alert_type  TEXT,
+                    created_at  TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS kepware_transactions (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp   TEXT NOT NULL,
+                    user        TEXT,
+                    action      TEXT,
+                    endpoint    TEXT,
+                    source_ip   TEXT,
+                    response    INTEGER,
+                    is_alert    INTEGER DEFAULT 0,
+                    created_at  TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_history_ts
                     ON monitor_history(timestamp);
                 CREATE INDEX IF NOT EXISTS idx_history_device
@@ -92,6 +120,14 @@ class DatabaseService:
                     ON alert_log(timestamp);
                 CREATE INDEX IF NOT EXISTS idx_webhook_ts
                     ON webhook_log(timestamp);
+                CREATE INDEX IF NOT EXISTS idx_kep_event_ts
+                    ON kepware_events(timestamp);
+                CREATE INDEX IF NOT EXISTS idx_kep_event_channel
+                    ON kepware_events(channel);
+                CREATE INDEX IF NOT EXISTS idx_kep_event_dedup
+                    ON kepware_events(dedup_hash);
+                CREATE INDEX IF NOT EXISTS idx_kep_tx_ts
+                    ON kepware_transactions(timestamp);
             """)
             conn.commit()
 
@@ -375,6 +411,149 @@ class DatabaseService:
             writer.writerows(rows)
         return len(rows)
 
+    # ===========================================
+    # Kepware Events
+    # ===========================================
+
+    def kepware_event_exists(self, dedup_hash):
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM kepware_events WHERE dedup_hash = ?", (dedup_hash,)
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+
+    def write_kepware_event(self, timestamp, event, source, channel, device,
+                            message, dedup_hash, is_alert=False, alert_type=None):
+        conn = self._get_conn()
+        try:
+            conn.execute(
+                """INSERT INTO kepware_events
+                   (timestamp, event, source, channel, device, message,
+                    dedup_hash, is_alert, alert_type, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (timestamp, event, source, channel, device, message,
+                 dedup_hash, int(is_alert), alert_type,
+                 datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def query_kepware_events(self, start_date=None, end_date=None,
+                             channel=None, event_type=None, limit=500):
+        conn = self._get_conn()
+        try:
+            sql = "SELECT * FROM kepware_events WHERE 1=1"
+            params = []
+            if start_date:
+                sql += " AND timestamp >= ?"
+                params.append(start_date)
+            if end_date:
+                sql += " AND timestamp <= ?"
+                params.append(end_date + " 23:59:59")
+            if channel:
+                sql += " AND channel = ?"
+                params.append(channel)
+            if event_type:
+                sql += " AND event = ?"
+                params.append(event_type)
+            sql += " ORDER BY timestamp DESC LIMIT ?"
+            params.append(limit)
+            rows = conn.execute(sql, params).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def count_channel_events_in_window(self, channel, window_start):
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                """SELECT COUNT(*) as cnt FROM kepware_events
+                   WHERE channel = ? AND timestamp >= ?
+                   AND event IN ('Warning', 'Error')""",
+                (channel, window_start),
+            ).fetchone()
+            return row["cnt"] if row else 0
+        finally:
+            conn.close()
+
+    def count_consecutive_tag_errors(self, channel, device):
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
+                """SELECT event FROM kepware_events
+                   WHERE channel = ? AND device = ?
+                   ORDER BY timestamp DESC LIMIT 100""",
+                (channel, device),
+            ).fetchall()
+            count = 0
+            for r in rows:
+                if r["event"] in ("Warning", "Error"):
+                    count += 1
+                else:
+                    break
+            return count
+        finally:
+            conn.close()
+
+    # ===========================================
+    # Kepware Transactions
+    # ===========================================
+
+    def kepware_transaction_exists(self, timestamp, user, action, endpoint):
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                """SELECT 1 FROM kepware_transactions
+                   WHERE timestamp = ? AND user = ? AND action = ? AND endpoint = ?""",
+                (timestamp, user, action, endpoint),
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+
+    def write_kepware_transaction(self, timestamp, user, action, endpoint,
+                                  source_ip, response, is_alert=False):
+        conn = self._get_conn()
+        try:
+            conn.execute(
+                """INSERT INTO kepware_transactions
+                   (timestamp, user, action, endpoint, source_ip,
+                    response, is_alert, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (timestamp, user, action, endpoint, source_ip,
+                 response, int(is_alert),
+                 datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def query_kepware_transactions(self, start_date=None, end_date=None,
+                                   action=None, limit=500):
+        conn = self._get_conn()
+        try:
+            sql = "SELECT * FROM kepware_transactions WHERE 1=1"
+            params = []
+            if start_date:
+                sql += " AND timestamp >= ?"
+                params.append(start_date)
+            if end_date:
+                sql += " AND timestamp <= ?"
+                params.append(end_date + " 23:59:59")
+            if action:
+                sql += " AND action = ?"
+                params.append(action)
+            sql += " ORDER BY timestamp DESC LIMIT ?"
+            params.append(limit)
+            rows = conn.execute(sql, params).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
     def cleanup_old_records(self, days=90):
         """清理超過指定天數的舊紀錄"""
         conn = self._get_conn()
@@ -393,11 +572,21 @@ class DatabaseService:
                 DELETE FROM webhook_log
                 WHERE julianday(?) - julianday(timestamp) > ?
             """
+            sql_kep_events = """
+                DELETE FROM kepware_events
+                WHERE julianday(?) - julianday(timestamp) > ?
+            """
+            sql_kep_tx = """
+                DELETE FROM kepware_transactions
+                WHERE julianday(?) - julianday(timestamp) > ?
+            """
             cur1 = conn.execute(sql_history, (cutoff, days))
             cur2 = conn.execute(sql_alerts, (cutoff, days))
             cur3 = conn.execute(sql_webhook, (cutoff, days))
+            cur4 = conn.execute(sql_kep_events, (cutoff, days))
+            cur5 = conn.execute(sql_kep_tx, (cutoff, days))
             conn.commit()
-            total = cur1.rowcount + cur2.rowcount + cur3.rowcount
+            total = cur1.rowcount + cur2.rowcount + cur3.rowcount + cur4.rowcount + cur5.rowcount
             if total > 0:
                 logging.info(f"清理舊紀錄: 刪除 {total} 筆 (超過 {days} 天)")
             return total
