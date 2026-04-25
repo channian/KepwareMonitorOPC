@@ -112,8 +112,8 @@ class MonitorManager:
         self.connections = {}  # name -> OPCConnection
         self._parse_servers()
 
-        # Kepware Log 監控
-        self.kepware_log = self._init_kepware_log()
+        # Kepware Log 監控（多台）
+        self.kepware_logs = self._init_kepware_logs()
 
         # 監控設備清單
         self.devices = []  # list of DeviceConfig
@@ -152,23 +152,65 @@ class MonitorManager:
             proxy_url=proxy_url or None,
         )
 
-    def _init_kepware_log(self):
-        enable = self.config.getboolean("KepwareLog", "Enable", fallback=False)
-        if not enable:
+    def _init_kepware_logs(self):
+        """初始化 Kepware Log 監控服務（支援多台）
+
+        支援兩種設定格式：
+        - 單台（向下相容）：[KepwareLog] + ServerName
+        - 多台：[KepwareLog.kepware_a], [KepwareLog.kepware_b], ...
+        """
+        instances = []
+        mail_to = self.global_mail_to
+        mail_cc = self.global_mail_cc
+
+        sections = [s for s in self.config.sections() if s.startswith("KepwareLog")]
+
+        for section in sections:
+            enable = self.config.getboolean(section, "Enable", fallback=False)
+            if not enable:
+                continue
+
+            base_url = self.config.get(section, "ApiBaseUrl", fallback="").strip()
+            if not base_url:
+                logging.warning(f"[{section}] 設定不完整（缺少 ApiBaseUrl），已跳過")
+                continue
+
+            if "." in section:
+                server_name = section.split(".", 1)[1]
+            else:
+                server_name = self.config.get(section, "ServerName", fallback="KepwareAPI").strip()
+
+            keywords_raw = self.config.get(
+                section, "CriticalKeywords",
+                fallback="Runtime stopped,License error,Server shutdown"
+            )
+            keywords = [k.strip() for k in keywords_raw.split(",") if k.strip()]
+
+            svc = KepwareLogService(
+                server_name=server_name,
+                base_url=base_url,
+                username=self.config.get(section, "Username", fallback=""),
+                password=self.config.get(section, "Password", fallback=""),
+                db_service=self.db,
+                email_service=self.email_service,
+                webhook_service=self.webhook,
+                poll_interval=self.config.getint(section, "PollInterval", fallback=600),
+                channel_alert_window=self.config.getint(section, "ChannelAlertWindow", fallback=3600),
+                channel_alert_threshold=self.config.getint(section, "ChannelAlertThreshold", fallback=5),
+                tag_error_consecutive=self.config.getint(section, "TagErrorConsecutive", fallback=6),
+                retention_days=self.config.getint(section, "RetentionDays", fallback=90),
+                critical_keywords=keywords,
+                mail_to=mail_to,
+                mail_cc=mail_cc,
+                event_subject=self.config.get(section, "EventSubject",
+                                              fallback="Kepware 事件監控通知"),
+            )
+            instances.append(svc)
+
+        if not instances:
             logging.info("Kepware Log 監控未啟用")
-            return None
 
-        base_url = self.config.get("KepwareLog", "ApiBaseUrl", fallback="").strip()
-        if not base_url:
-            logging.warning("Kepware Log 設定不完整（缺少 ApiBaseUrl），已停用")
-            return None
-
-        return KepwareLogService(
-            config=self.config,
-            db_service=self.db,
-            email_service=self.email_service,
-            webhook_service=self.webhook,
-        )
+        return instances
 
     def _parse_servers(self):
         """解析設定檔中的多 Kepware Server"""
@@ -619,7 +661,10 @@ class MonitorManager:
             await conn.connect()
 
         # 清理舊 DB 紀錄
-        retention = self.config.getint("KepwareLog", "RetentionDays", fallback=90)
+        if self.kepware_logs:
+            retention = max(kl.retention_days for kl in self.kepware_logs)
+        else:
+            retention = 90
         self.db.cleanup_old_records(days=retention)
 
         # 進入主迴圈
@@ -631,7 +676,7 @@ class MonitorManager:
         主監控迴圈 — 讀值與重連邏輯與舊版一致。
         """
         last_csv_check = 0
-        last_kepware_log_poll = 0
+        last_kepware_log_poll = {}
 
         while True:
             now = time.time()
@@ -694,17 +739,17 @@ class MonitorManager:
                     except Exception as ex:
                         logging.exception(f"[{conn_name}] 處理設備 {device.name} 發生錯誤: {ex}")
 
-            # Kepware Log polling
-            if self.kepware_log:
-                kl_interval = self.kepware_log.poll_interval
-                if (now - last_kepware_log_poll) >= kl_interval:
+            # Kepware Log polling（多台）
+            for kl in self.kepware_logs:
+                last_t = last_kepware_log_poll.get(kl.server_name, 0)
+                if (now - last_t) >= kl.poll_interval:
                     try:
                         await asyncio.get_event_loop().run_in_executor(
-                            None, self.kepware_log.poll
+                            None, kl.poll
                         )
                     except Exception as ex:
-                        logging.error(f"Kepware Log polling 錯誤: {ex}")
-                    last_kepware_log_poll = time.time()
+                        logging.error(f"Kepware Log[{kl.server_name}] polling 錯誤: {ex}")
+                    last_kepware_log_poll[kl.server_name] = time.time()
 
             # 等待下一輪
             log_and_print(f"等待 {self.check_interval} 秒後更新...")

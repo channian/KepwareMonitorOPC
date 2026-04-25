@@ -14,33 +14,41 @@ class KepwareLogService:
       - 定期 polling events 和 transactions
       - 去重（timestamp + hash）
       - 異常判斷與派報觸發
+      - 支援多台 Kepware（每台獨立 section: [KepwareLog.server_name]）
     """
 
     CHANNEL_DEVICE_RE = re.compile(r"^([A-Za-z0-9_\-]+)\.([A-Za-z0-9_\-]+)\s*\|")
+    TAG_ADDRESS_RE = re.compile(r"Tag address\s*=\s*'([^']+)'")
 
-    def __init__(self, config, db_service, email_service, webhook_service=None):
-        self.config = config
+    def __init__(self, server_name, base_url, username, password,
+                 db_service, email_service, webhook_service=None,
+                 poll_interval=600,
+                 channel_alert_window=3600, channel_alert_threshold=5,
+                 tag_error_consecutive=6, retention_days=90,
+                 critical_keywords=None,
+                 mail_to=None, mail_cc=None, event_subject=None):
+        self.server_name = server_name
         self.db = db_service
         self.email_service = email_service
         self.webhook = webhook_service
 
-        self.base_url = config.get("KepwareLog", "ApiBaseUrl", fallback="").strip().rstrip("/")
-        self.username = config.get("KepwareLog", "Username", fallback="")
-        self.password = config.get("KepwareLog", "Password", fallback="")
-        self.poll_interval = config.getint("KepwareLog", "PollInterval", fallback=600)
+        self.base_url = base_url.strip().rstrip("/")
+        self.username = username
+        self.password = password
+        self.poll_interval = poll_interval
 
-        self.channel_alert_window = config.getint("KepwareLog", "ChannelAlertWindow", fallback=3600)
-        self.channel_alert_threshold = config.getint("KepwareLog", "ChannelAlertThreshold", fallback=5)
-        self.tag_error_consecutive = config.getint("KepwareLog", "TagErrorConsecutive", fallback=6)
-        self.retention_days = config.getint("KepwareLog", "RetentionDays", fallback=90)
+        self.channel_alert_window = channel_alert_window
+        self.channel_alert_threshold = channel_alert_threshold
+        self.tag_error_consecutive = tag_error_consecutive
+        self.retention_days = retention_days
 
-        keywords_raw = config.get("KepwareLog", "CriticalKeywords",
-                                  fallback="Runtime stopped,License error,Server shutdown")
-        self.critical_keywords = [k.strip() for k in keywords_raw.split(",") if k.strip()]
+        self.critical_keywords = critical_keywords or [
+            "Runtime stopped", "License error", "Server shutdown"
+        ]
 
-        self.global_mail_to = [x.strip() for x in config.get("Mail", "To", fallback="").split(",") if x.strip()]
-        self.global_mail_cc = [x.strip() for x in config.get("Mail", "Cc", fallback="").split(",") if x.strip()]
-        self.mail_subject = config.get("Mail", "Subject", fallback="Kepware 設備監控通知")
+        self.global_mail_to = mail_to or []
+        self.global_mail_cc = mail_cc or []
+        self.mail_subject = event_subject or "Kepware 事件監控通知"
 
         self._token = None
         self._headers = {}
@@ -49,8 +57,8 @@ class KepwareLogService:
         self._alerted_channels = {}
         self._alerted_tags = set()
 
-        logging.info(f"KepwareLogService 初始化: base_url={self.base_url}, "
-                     f"poll={self.poll_interval}s, "
+        logging.info(f"KepwareLogService[{self.server_name}] 初始化: "
+                     f"base_url={self.base_url}, poll={self.poll_interval}s, "
                      f"channel_threshold={self.channel_alert_threshold}/{self.channel_alert_window}s, "
                      f"tag_consecutive={self.tag_error_consecutive}")
 
@@ -68,9 +76,9 @@ class KepwareLogService:
             resp.raise_for_status()
             self._token = resp.json()["access_token"]
             self._headers = {"Authorization": f"Bearer {self._token}"}
-            logging.info("KepwareLogService: JWT 登入成功")
+            logging.info(f"KepwareLogService[{self.server_name}]: JWT 登入成功")
         except Exception as ex:
-            logging.error(f"KepwareLogService: JWT 登入失敗: {ex}")
+            logging.error(f"KepwareLogService[{self.server_name}]: JWT 登入失敗: {ex}")
             raise
 
     def _api_get(self, path):
@@ -81,7 +89,7 @@ class KepwareLogService:
         resp = requests.get(url, headers=self._headers, timeout=30)
 
         if resp.status_code == 401:
-            logging.info("KepwareLogService: Token 過期，重新登入")
+            logging.info(f"KepwareLogService[{self.server_name}]: Token 過期，重新登入")
             self._login()
             resp = requests.get(url, headers=self._headers, timeout=30)
 
@@ -97,7 +105,7 @@ class KepwareLogService:
             self._poll_events()
             self._poll_transactions()
         except Exception as ex:
-            logging.error(f"KepwareLogService polling 失敗: {ex}")
+            logging.error(f"KepwareLogService[{self.server_name}] polling 失敗: {ex}")
 
     def _poll_events(self):
         data = self._api_get("/api/monitor/events")
@@ -115,6 +123,7 @@ class KepwareLogService:
                 continue
 
             channel, device = self._parse_channel_device(message)
+            tag_address = self._parse_tag_address(message)
 
             is_alert, alert_type = self._evaluate_event(
                 event_type, message, channel, device, ts
@@ -124,11 +133,12 @@ class KepwareLogService:
                 timestamp=ts, event=event_type, source=source,
                 channel=channel, device=device, message=message,
                 dedup_hash=dedup_hash, is_alert=is_alert, alert_type=alert_type,
+                server_name=self.server_name, tag_address=tag_address,
             )
             new_count += 1
 
         if new_count > 0:
-            logging.info(f"KepwareLogService: 寫入 {new_count} 筆新事件")
+            logging.info(f"KepwareLogService[{self.server_name}]: 寫入 {new_count} 筆新事件")
 
     def _poll_transactions(self):
         data = self._api_get("/api/monitor/transactions")
@@ -152,6 +162,7 @@ class KepwareLogService:
                 timestamp=ts, user=user, action=action,
                 endpoint=endpoint, source_ip=source_ip,
                 response=response, is_alert=is_alert,
+                server_name=self.server_name,
             )
             new_count += 1
 
@@ -159,7 +170,7 @@ class KepwareLogService:
                 self._send_transaction_alert(tx)
 
         if new_count > 0:
-            logging.info(f"KepwareLogService: 寫入 {new_count} 筆新交易紀錄")
+            logging.info(f"KepwareLogService[{self.server_name}]: 寫入 {new_count} 筆新交易紀錄")
 
     # ===========================================
     # 解析 & 去重
@@ -176,6 +187,10 @@ class KepwareLogService:
             return m.group(1), m.group(2)
         return "", ""
 
+    def _parse_tag_address(self, message):
+        m = self.TAG_ADDRESS_RE.search(message)
+        return m.group(1) if m else ""
+
     # ===========================================
     # 異常判斷
     # ===========================================
@@ -183,6 +198,8 @@ class KepwareLogService:
     def _evaluate_event(self, event_type, message, channel, device, timestamp):
         if event_type not in ("Warning", "Error"):
             return False, None
+
+        tag_address = self._parse_tag_address(message)
 
         for kw in self.critical_keywords:
             if kw.lower() in message.lower():
@@ -213,7 +230,7 @@ class KepwareLogService:
                 tag_key = f"tag:{channel}.{device}"
                 if tag_key not in self._alerted_tags:
                     self._alerted_tags.add(tag_key)
-                    self._send_tag_alert(channel, device, consecutive, timestamp)
+                    self._send_tag_alert(channel, device, consecutive, timestamp, tag_address)
                 return True, "tag_consecutive"
 
         return False, None
@@ -223,10 +240,11 @@ class KepwareLogService:
     # ===========================================
 
     def _send_critical_alert(self, event_type, message, timestamp):
-        subject = f"[緊急] {self.mail_subject} - Kepware 關鍵事件"
+        subject = f"[緊急] {self.mail_subject} - [{self.server_name}] 關鍵事件"
         html_body = f"""
         <html><body>
             <h2 style="color: #dc3545;">Kepware 關鍵事件告警</h2>
+            <p><strong>Kepware Server:</strong> {self.server_name}</p>
             <p><strong>時間:</strong> {timestamp}</p>
             <p><strong>事件等級:</strong> {event_type}</p>
             <p><strong>訊息:</strong></p>
@@ -238,10 +256,11 @@ class KepwareLogService:
 
     def _send_channel_alert(self, channel, count, timestamp):
         window_min = self.channel_alert_window // 60
-        subject = f"[異常] {self.mail_subject} - Channel {channel} 通訊異常"
+        subject = f"[異常] {self.mail_subject} - [{self.server_name}] Channel {channel} 通訊異常"
         html_body = f"""
         <html><body>
             <h2 style="color: #dc3545;">Kepware Channel 通訊異常</h2>
+            <p><strong>Kepware Server:</strong> {self.server_name}</p>
             <p><strong>時間:</strong> {timestamp}</p>
             <p><strong>Channel:</strong> {channel}</p>
             <p><strong>累積次數:</strong>
@@ -253,14 +272,19 @@ class KepwareLogService:
         """
         self._do_send_alert(subject, html_body, "kepware_channel", channel)
 
-    def _send_tag_alert(self, channel, device, count, timestamp):
+    def _send_tag_alert(self, channel, device, count, timestamp, tag_address=""):
         tag_name = f"{channel}.{device}"
-        subject = f"[異常] {self.mail_subject} - Tag {tag_name} 讀取異常"
+        subject = f"[異常] {self.mail_subject} - [{self.server_name}] Tag {tag_name} 讀取異常"
+        tag_addr_html = ""
+        if tag_address:
+            tag_addr_html = f"<p><strong>Tag Address:</strong> <code>{tag_address}</code></p>"
         html_body = f"""
         <html><body>
             <h2 style="color: #dc3545;">Kepware Tag 讀取異常</h2>
+            <p><strong>Kepware Server:</strong> {self.server_name}</p>
             <p><strong>時間:</strong> {timestamp}</p>
             <p><strong>Channel.Device:</strong> {tag_name}</p>
+            {tag_addr_html}
             <p><strong>連續失敗次數:</strong>
                <span style="font-size:1.2em;font-weight:bold;color:#dc3545;">
                {count} 次</span></p>
@@ -271,10 +295,11 @@ class KepwareLogService:
         self._do_send_alert(subject, html_body, "kepware_tag", tag_name)
 
     def _send_transaction_alert(self, tx):
-        subject = f"[操作] {self.mail_subject} - Kepware DELETE 操作通知"
+        subject = f"[操作] {self.mail_subject} - [{self.server_name}] DELETE 操作通知"
         html_body = f"""
         <html><body>
             <h2 style="color: #f59e0b;">Kepware 設定刪除操作通知</h2>
+            <p><strong>Kepware Server:</strong> {self.server_name}</p>
             <p><strong>時間:</strong> {tx.get('timestamp')}</p>
             <p><strong>操作者:</strong> {tx.get('user')}</p>
             <p><strong>操作:</strong> DELETE</p>
@@ -288,7 +313,7 @@ class KepwareLogService:
                             f"{tx.get('user')} DELETE {tx.get('endpoint')}")
 
     def _do_send_alert(self, subject, html_body, alert_type, diagnostic_msg):
-        logging.info(f"KepwareLogService 派報: {subject}")
+        logging.info(f"KepwareLogService[{self.server_name}] 派報: {subject}")
 
         try:
             self.email_service.send_alert_email(
@@ -298,11 +323,11 @@ class KepwareLogService:
                 html_body=html_body,
             )
         except Exception as ex:
-            logging.exception(f"KepwareLogService 寄信失敗: {ex}")
+            logging.exception(f"KepwareLogService[{self.server_name}] 寄信失敗: {ex}")
 
         try:
             self.db.write_alert_log(
-                server_name="KepwareAPI",
+                server_name=self.server_name,
                 device_name="",
                 alert_type=alert_type,
                 diagnostic_level=alert_type,
@@ -312,7 +337,7 @@ class KepwareLogService:
                 subject=subject,
             )
         except Exception as ex:
-            logging.warning(f"KepwareLogService 派報紀錄寫入失敗: {ex}")
+            logging.warning(f"KepwareLogService[{self.server_name}] 派報紀錄寫入失敗: {ex}")
 
         if self.webhook:
             self._fire_webhook(subject, diagnostic_msg, alert_type)
@@ -321,7 +346,7 @@ class KepwareLogService:
         def _do_send():
             try:
                 variables = self.webhook.build_variables(
-                    server_name="KepwareAPI",
+                    server_name=self.server_name,
                     device_name=alert_type,
                     value="",
                     threshold="",
@@ -334,12 +359,12 @@ class KepwareLogService:
                 self.webhook.send(
                     variables,
                     db_service=self.db,
-                    server_name="KepwareAPI",
+                    server_name=self.server_name,
                     device_name=alert_type,
                     is_recovery=False,
                 )
             except Exception as ex:
-                logging.warning(f"KepwareLogService Webhook 推播失敗: {ex}")
+                logging.warning(f"KepwareLogService[{self.server_name}] Webhook 推播失敗: {ex}")
 
         t = threading.Thread(target=_do_send, daemon=True)
         t.start()

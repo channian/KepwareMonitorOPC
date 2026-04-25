@@ -655,10 +655,12 @@ async def api_kepware_events(request: Request):
     end_date = request.query_params.get("end_date")
     channel = request.query_params.get("channel")
     event_type = request.query_params.get("event_type")
+    server_name = request.query_params.get("server_name")
 
     rows = db_service.query_kepware_events(
         start_date=start_date, end_date=end_date,
         channel=channel, event_type=event_type,
+        server_name=server_name,
     )
     return JSONResponse({"data": rows})
 
@@ -672,9 +674,11 @@ async def api_kepware_transactions(request: Request):
     start_date = request.query_params.get("start_date")
     end_date = request.query_params.get("end_date")
     action = request.query_params.get("action")
+    server_name = request.query_params.get("server_name")
 
     rows = db_service.query_kepware_transactions(
-        start_date=start_date, end_date=end_date, action=action,
+        start_date=start_date, end_date=end_date,
+        action=action, server_name=server_name,
     )
     return JSONResponse({"data": rows})
 
@@ -685,12 +689,16 @@ async def api_kepware_health(request: Request):
     if err:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
-    if not monitor_manager or not monitor_manager.kepware_log:
+    if not monitor_manager or not monitor_manager.kepware_logs:
         return JSONResponse({"enabled": False})
 
-    kl = monitor_manager.kepware_log
-    try:
-        data = kl._api_get("/api/health")
-        return JSONResponse({"enabled": True, "health": data})
-    except Exception as ex:
-        return JSONResponse({"enabled": True, "health": None, "error": str(ex)})
+    results = []
+    for kl in monitor_manager.kepware_logs:
+        try:
+            data = kl._api_get("/api/health")
+            results.append({"server_name": kl.server_name, "health": data})
+        except Exception as ex:
+            results.append({"server_name": kl.server_name, "health": None,
+                            "error": str(ex)})
+
+    return JSONResponse({"enabled": True, "servers": results})

@@ -89,10 +89,12 @@ class DatabaseService:
                 CREATE TABLE IF NOT EXISTS kepware_events (
                     id          INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp   TEXT NOT NULL,
+                    server_name TEXT,
                     event       TEXT,
                     source      TEXT,
                     channel     TEXT,
                     device      TEXT,
+                    tag_address TEXT,
                     message     TEXT,
                     dedup_hash  TEXT,
                     is_alert    INTEGER DEFAULT 0,
@@ -103,6 +105,7 @@ class DatabaseService:
                 CREATE TABLE IF NOT EXISTS kepware_transactions (
                     id          INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp   TEXT NOT NULL,
+                    server_name TEXT,
                     user        TEXT,
                     action      TEXT,
                     endpoint    TEXT,
@@ -131,6 +134,8 @@ class DatabaseService:
             """)
             conn.commit()
 
+            self._migrate_kepware_columns(conn)
+
             # 建立預設 admin 帳號（若不存在）
             self._ensure_default_admin(conn)
         finally:
@@ -148,6 +153,23 @@ class DatabaseService:
             salt = secrets.token_hex(16)
         hashed = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
         return hashed, salt
+
+    @staticmethod
+    def _migrate_kepware_columns(conn):
+        """為既有 DB 補上新欄位（server_name, tag_address）"""
+        cursor = conn.execute("PRAGMA table_info(kepware_events)")
+        ev_cols = {row[1] for row in cursor.fetchall()}
+        if "server_name" not in ev_cols:
+            conn.execute("ALTER TABLE kepware_events ADD COLUMN server_name TEXT")
+        if "tag_address" not in ev_cols:
+            conn.execute("ALTER TABLE kepware_events ADD COLUMN tag_address TEXT")
+
+        cursor = conn.execute("PRAGMA table_info(kepware_transactions)")
+        tx_cols = {row[1] for row in cursor.fetchall()}
+        if "server_name" not in tx_cols:
+            conn.execute("ALTER TABLE kepware_transactions ADD COLUMN server_name TEXT")
+
+        conn.commit()
 
     def _ensure_default_admin(self, conn):
         """確保預設 admin 帳號存在"""
@@ -426,16 +448,17 @@ class DatabaseService:
             conn.close()
 
     def write_kepware_event(self, timestamp, event, source, channel, device,
-                            message, dedup_hash, is_alert=False, alert_type=None):
+                            message, dedup_hash, is_alert=False, alert_type=None,
+                            server_name=None, tag_address=None):
         conn = self._get_conn()
         try:
             conn.execute(
                 """INSERT INTO kepware_events
-                   (timestamp, event, source, channel, device, message,
-                    dedup_hash, is_alert, alert_type, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (timestamp, event, source, channel, device, message,
-                 dedup_hash, int(is_alert), alert_type,
+                   (timestamp, server_name, event, source, channel, device,
+                    tag_address, message, dedup_hash, is_alert, alert_type, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (timestamp, server_name, event, source, channel, device,
+                 tag_address, message, dedup_hash, int(is_alert), alert_type,
                  datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
             )
             conn.commit()
@@ -443,11 +466,15 @@ class DatabaseService:
             conn.close()
 
     def query_kepware_events(self, start_date=None, end_date=None,
-                             channel=None, event_type=None, limit=500):
+                             channel=None, event_type=None,
+                             server_name=None, limit=500):
         conn = self._get_conn()
         try:
             sql = "SELECT * FROM kepware_events WHERE 1=1"
             params = []
+            if server_name:
+                sql += " AND server_name = ?"
+                params.append(server_name)
             if start_date:
                 sql += " AND timestamp >= ?"
                 params.append(start_date)
@@ -516,15 +543,16 @@ class DatabaseService:
             conn.close()
 
     def write_kepware_transaction(self, timestamp, user, action, endpoint,
-                                  source_ip, response, is_alert=False):
+                                  source_ip, response, is_alert=False,
+                                  server_name=None):
         conn = self._get_conn()
         try:
             conn.execute(
                 """INSERT INTO kepware_transactions
-                   (timestamp, user, action, endpoint, source_ip,
+                   (timestamp, server_name, user, action, endpoint, source_ip,
                     response, is_alert, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (timestamp, user, action, endpoint, source_ip,
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (timestamp, server_name, user, action, endpoint, source_ip,
                  response, int(is_alert),
                  datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
             )
@@ -533,11 +561,14 @@ class DatabaseService:
             conn.close()
 
     def query_kepware_transactions(self, start_date=None, end_date=None,
-                                   action=None, limit=500):
+                                   action=None, server_name=None, limit=500):
         conn = self._get_conn()
         try:
             sql = "SELECT * FROM kepware_transactions WHERE 1=1"
             params = []
+            if server_name:
+                sql += " AND server_name = ?"
+                params.append(server_name)
             if start_date:
                 sql += " AND timestamp >= ?"
                 params.append(start_date)
