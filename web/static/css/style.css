@@ -186,7 +186,7 @@ input, select, textarea { font-family: inherit; }
 .dot-muted { background: var(--muted); }
 
 /* ---------- Tables ---------- */
-.tbl-wrap { border-radius: var(--r-md); overflow: hidden; border: 1px solid var(--border-1); }
+.tbl-wrap { border-radius: var(--r-md); overflow: auto; border: 1px solid var(--border-1); }
 table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
 thead th { background: var(--bg-1); padding: 10px 14px; text-align: left; font-weight: 600; color: var(--fg-2); font-size: 10.5px; text-transform: uppercase; letter-spacing: var(--ls-caps); border-bottom: 1px solid var(--border-1); white-space: nowrap; position: sticky; top: 0; z-index: 1; }
 tbody td { padding: 11px 14px; border-bottom: 1px solid var(--border-1); color: var(--fg-1); }
