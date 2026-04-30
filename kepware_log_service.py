@@ -20,12 +20,22 @@ class KepwareLogService:
     CHANNEL_DEVICE_RE = re.compile(r"^([A-Za-z0-9_\-]+)\.([A-Za-z0-9_\-]+)\s*\|")
     TAG_ADDRESS_RE = re.compile(r"Tag address\s*=\s*'([^']+)'")
 
+    SEVERITY_LEVELS = ("Critical", "Warning", "Advisory", "Unclassified")
+
+    DEFAULT_SEVERITY_CRITICAL = ["Device not responding"]
+    DEFAULT_SEVERITY_WARNING = ["Timeout", "Add item failed"]
+    DEFAULT_SEVERITY_ADVISORY = ["Failed to remove item"]
+
     def __init__(self, server_name, base_url, username, password,
                  db_service, email_service, webhook_service=None,
                  poll_interval=600,
                  channel_alert_window=3600, channel_alert_threshold=5,
                  tag_error_consecutive=6, retention_days=90,
                  critical_keywords=None,
+                 severity_critical=None, severity_warning=None,
+                 severity_advisory=None,
+                 adaptive_baseline_days=7, adaptive_multiplier=3.0,
+                 adaptive_min_threshold=3,
                  mail_to=None, mail_cc=None, event_subject=None):
         self.server_name = server_name
         self.db = db_service
@@ -46,6 +56,14 @@ class KepwareLogService:
             "Runtime stopped", "License error", "Server shutdown"
         ]
 
+        self.severity_critical = severity_critical or self.DEFAULT_SEVERITY_CRITICAL
+        self.severity_warning = severity_warning or self.DEFAULT_SEVERITY_WARNING
+        self.severity_advisory = severity_advisory or self.DEFAULT_SEVERITY_ADVISORY
+
+        self.adaptive_baseline_days = adaptive_baseline_days
+        self.adaptive_multiplier = adaptive_multiplier
+        self.adaptive_min_threshold = adaptive_min_threshold
+
         self.global_mail_to = mail_to or []
         self.global_mail_cc = mail_cc or []
         self.mail_subject = event_subject or "Kepware 事件監控通知"
@@ -56,10 +74,11 @@ class KepwareLogService:
         self._last_tx_ts = None
         self._alerted_channels = {}
         self._alerted_tags = set()
+        self._channel_baselines = {}
 
         logging.info(f"KepwareLogService[{self.server_name}] 初始化: "
                      f"base_url={self.base_url}, poll={self.poll_interval}s, "
-                     f"channel_threshold={self.channel_alert_threshold}/{self.channel_alert_window}s, "
+                     f"adaptive={self.adaptive_multiplier}x/{self.adaptive_baseline_days}d, "
                      f"tag_consecutive={self.tag_error_consecutive}")
 
     # ===========================================
@@ -124,9 +143,10 @@ class KepwareLogService:
 
             channel, device = self._parse_channel_device(message)
             tag_address = self._parse_tag_address(message)
+            severity = self._classify_severity(message)
 
             is_alert, alert_type = self._evaluate_event(
-                event_type, message, channel, device, ts
+                event_type, message, channel, device, ts, severity
             )
 
             self.db.write_kepware_event(
@@ -134,6 +154,7 @@ class KepwareLogService:
                 channel=channel, device=device, message=message,
                 dedup_hash=dedup_hash, is_alert=is_alert, alert_type=alert_type,
                 server_name=self.server_name, tag_address=tag_address,
+                severity=severity,
             )
             new_count += 1
 
@@ -192,35 +213,78 @@ class KepwareLogService:
         return m.group(1) if m else ""
 
     # ===========================================
-    # 異常判斷
+    # 事件分類 & 自適應閥值
     # ===========================================
 
-    def _evaluate_event(self, event_type, message, channel, device, timestamp):
+    def _classify_severity(self, message):
+        msg_lower = message.lower()
+        for kw in self.severity_critical:
+            if kw.lower() in msg_lower:
+                return "Critical"
+        for kw in self.severity_warning:
+            if kw.lower() in msg_lower:
+                return "Warning"
+        for kw in self.severity_advisory:
+            if kw.lower() in msg_lower:
+                return "Advisory"
+        return "Unclassified"
+
+    def _get_adaptive_threshold(self, channel):
+        baseline = self._channel_baselines.get(channel)
+        now = datetime.now()
+        if baseline and (now - baseline["ts"]).total_seconds() < 86400:
+            return baseline["threshold"]
+
+        avg_hourly = self.db.get_channel_hourly_error_rate(
+            channel, days=self.adaptive_baseline_days
+        )
+        threshold = max(avg_hourly * self.adaptive_multiplier,
+                        self.adaptive_min_threshold)
+        self._channel_baselines[channel] = {"threshold": threshold, "ts": now}
+        logging.info(f"KepwareLogService[{self.server_name}] "
+                     f"Channel {channel} 自適應閥值: {threshold:.1f}/hr "
+                     f"(基準 {avg_hourly:.2f}/hr × {self.adaptive_multiplier})")
+        return threshold
+
+    def _evaluate_event(self, event_type, message, channel, device,
+                        timestamp, severity):
         if event_type not in ("Warning", "Error"):
             return False, None
 
         tag_address = self._parse_tag_address(message)
+
+        if severity == "Critical":
+            self._send_critical_alert(event_type, message, timestamp)
+            return True, "critical_event"
 
         for kw in self.critical_keywords:
             if kw.lower() in message.lower():
                 self._send_critical_alert(event_type, message, timestamp)
                 return True, "critical_keyword"
 
+        if severity == "Advisory":
+            return False, None
+
         if channel:
+            if severity == "Warning":
+                threshold = self._get_adaptive_threshold(channel)
+            else:
+                threshold = self.channel_alert_threshold
+
             window_start = (
                 datetime.fromisoformat(timestamp) - timedelta(seconds=self.channel_alert_window)
             ).isoformat()
             count = self.db.count_channel_events_in_window(channel, window_start)
             count += 1
 
-            if count >= self.channel_alert_threshold:
+            if count >= threshold:
                 alert_key = f"channel:{channel}"
                 now = datetime.now()
                 last_alerted = self._alerted_channels.get(alert_key)
                 if not last_alerted or (now - last_alerted).total_seconds() > self.channel_alert_window:
                     self._alerted_channels[alert_key] = now
                     self._send_channel_alert(channel, count, timestamp)
-                return True, "channel_threshold"
+                return True, "channel_adaptive" if severity == "Warning" else "channel_threshold"
 
         if channel and device:
             consecutive = self.db.count_consecutive_tag_errors(channel, device)

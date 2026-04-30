@@ -656,11 +656,12 @@ async def api_kepware_events(request: Request):
     channel = request.query_params.get("channel")
     event_type = request.query_params.get("event_type")
     server_name = request.query_params.get("server_name")
+    severity = request.query_params.get("severity")
 
     rows = db_service.query_kepware_events(
         start_date=start_date, end_date=end_date,
         channel=channel, event_type=event_type,
-        server_name=server_name,
+        server_name=server_name, severity=severity,
     )
     return JSONResponse({"data": rows})
 
@@ -702,3 +703,20 @@ async def api_kepware_health(request: Request):
                             "error": str(ex)})
 
     return JSONResponse({"enabled": True, "servers": results})
+
+
+@app.get("/api/kepware/stats")
+async def api_kepware_stats(request: Request):
+    user, err = _admin_or_403(request)
+    if err:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    start_date = request.query_params.get("start_date")
+    end_date = request.query_params.get("end_date")
+    server_name = request.query_params.get("server_name")
+
+    stats = db_service.get_kepware_event_stats(
+        start_date=start_date, end_date=end_date,
+        server_name=server_name,
+    )
+    return JSONResponse(stats)

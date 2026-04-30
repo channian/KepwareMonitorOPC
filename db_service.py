@@ -95,6 +95,7 @@ class DatabaseService:
                     channel     TEXT,
                     device      TEXT,
                     tag_address TEXT,
+                    severity    TEXT,
                     message     TEXT,
                     dedup_hash  TEXT,
                     is_alert    INTEGER DEFAULT 0,
@@ -156,13 +157,12 @@ class DatabaseService:
 
     @staticmethod
     def _migrate_kepware_columns(conn):
-        """為既有 DB 補上新欄位（server_name, tag_address）"""
+        """為既有 DB 補上新欄位"""
         cursor = conn.execute("PRAGMA table_info(kepware_events)")
         ev_cols = {row[1] for row in cursor.fetchall()}
-        if "server_name" not in ev_cols:
-            conn.execute("ALTER TABLE kepware_events ADD COLUMN server_name TEXT")
-        if "tag_address" not in ev_cols:
-            conn.execute("ALTER TABLE kepware_events ADD COLUMN tag_address TEXT")
+        for col in ("server_name", "tag_address", "severity"):
+            if col not in ev_cols:
+                conn.execute(f"ALTER TABLE kepware_events ADD COLUMN {col} TEXT")
 
         cursor = conn.execute("PRAGMA table_info(kepware_transactions)")
         tx_cols = {row[1] for row in cursor.fetchall()}
@@ -449,16 +449,16 @@ class DatabaseService:
 
     def write_kepware_event(self, timestamp, event, source, channel, device,
                             message, dedup_hash, is_alert=False, alert_type=None,
-                            server_name=None, tag_address=None):
+                            server_name=None, tag_address=None, severity=None):
         conn = self._get_conn()
         try:
             conn.execute(
                 """INSERT INTO kepware_events
                    (timestamp, server_name, event, source, channel, device,
-                    tag_address, message, dedup_hash, is_alert, alert_type, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    tag_address, severity, message, dedup_hash, is_alert, alert_type, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (timestamp, server_name, event, source, channel, device,
-                 tag_address, message, dedup_hash, int(is_alert), alert_type,
+                 tag_address, severity, message, dedup_hash, int(is_alert), alert_type,
                  datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
             )
             conn.commit()
@@ -467,7 +467,7 @@ class DatabaseService:
 
     def query_kepware_events(self, start_date=None, end_date=None,
                              channel=None, event_type=None,
-                             server_name=None, limit=500):
+                             server_name=None, severity=None, limit=500):
         conn = self._get_conn()
         try:
             sql = "SELECT * FROM kepware_events WHERE 1=1"
@@ -487,6 +487,9 @@ class DatabaseService:
             if event_type:
                 sql += " AND event = ?"
                 params.append(event_type)
+            if severity:
+                sql += " AND severity = ?"
+                params.append(severity)
             sql += " ORDER BY timestamp DESC LIMIT ?"
             params.append(limit)
             rows = conn.execute(sql, params).fetchall()
@@ -582,6 +585,115 @@ class DatabaseService:
             params.append(limit)
             rows = conn.execute(sql, params).fetchall()
             return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    # ===========================================
+    # Kepware 自適應閥值 & 統計
+    # ===========================================
+
+    def get_channel_hourly_error_rate(self, channel, days=7):
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                """SELECT COUNT(*) as cnt FROM kepware_events
+                   WHERE channel = ?
+                   AND event IN ('Warning', 'Error')
+                   AND timestamp >= datetime('now', '-' || ? || ' days')""",
+                (channel, str(days)),
+            ).fetchone()
+            total = row["cnt"] if row else 0
+            hours = days * 24
+            return total / hours if hours > 0 else 0
+        finally:
+            conn.close()
+
+    def get_kepware_event_stats(self, start_date=None, end_date=None,
+                                server_name=None):
+        conn = self._get_conn()
+        try:
+            where = "WHERE 1=1"
+            params = []
+            if server_name:
+                where += " AND server_name = ?"
+                params.append(server_name)
+            if start_date:
+                where += " AND timestamp >= ?"
+                params.append(start_date)
+            if end_date:
+                where += " AND timestamp <= ?"
+                params.append(end_date + " 23:59:59")
+
+            daily_sql = f"""
+                SELECT substr(timestamp, 1, 10) as date,
+                       COALESCE(severity, 'Unclassified') as sev,
+                       COUNT(*) as cnt
+                FROM kepware_events {where}
+                GROUP BY date, sev
+                ORDER BY date
+            """
+            daily_rows = conn.execute(daily_sql, params).fetchall()
+
+            daily = {}
+            for r in daily_rows:
+                d = r["date"]
+                if d not in daily:
+                    daily[d] = {"date": d, "Critical": 0, "Warning": 0,
+                                "Advisory": 0, "Unclassified": 0}
+                sev = r["sev"] if r["sev"] in ("Critical", "Warning", "Advisory") else "Unclassified"
+                daily[d][sev] += r["cnt"]
+
+            channel_sql = f"""
+                SELECT channel,
+                       COALESCE(severity, 'Unclassified') as sev,
+                       COUNT(*) as cnt
+                FROM kepware_events {where} AND channel != ''
+                GROUP BY channel, sev
+                ORDER BY channel
+            """
+            ch_rows = conn.execute(channel_sql, params).fetchall()
+
+            by_channel = {}
+            for r in ch_rows:
+                ch = r["channel"]
+                if ch not in by_channel:
+                    by_channel[ch] = {"channel": ch, "Critical": 0, "Warning": 0,
+                                      "Advisory": 0, "Unclassified": 0}
+                sev = r["sev"] if r["sev"] in ("Critical", "Warning", "Advisory") else "Unclassified"
+                by_channel[ch][sev] += r["cnt"]
+
+            return {
+                "daily": list(daily.values()),
+                "by_channel": list(by_channel.values()),
+            }
+        finally:
+            conn.close()
+
+    # ===========================================
+    # Tag 動態閥值
+    # ===========================================
+
+    def get_recent_device_values(self, device_name, server_name=None, limit=24):
+        conn = self._get_conn()
+        try:
+            if server_name:
+                sql = """SELECT value FROM monitor_history
+                         WHERE device_name = ? AND server_name = ?
+                         AND value IS NOT NULL AND value != ''
+                         ORDER BY timestamp DESC LIMIT ?"""
+                rows = conn.execute(sql, (device_name, server_name, limit)).fetchall()
+            else:
+                sql = """SELECT value FROM monitor_history
+                         WHERE device_name = ? AND value IS NOT NULL AND value != ''
+                         ORDER BY timestamp DESC LIMIT ?"""
+                rows = conn.execute(sql, (device_name, limit)).fetchall()
+            values = []
+            for r in rows:
+                try:
+                    values.append(float(r["value"]))
+                except (ValueError, TypeError):
+                    pass
+            return values
         finally:
             conn.close()
 

@@ -84,6 +84,8 @@ class MonitorManager:
         self.check_interval = config.getint("Monitor", "intervalSeconds", fallback=600)
         self.csv_reload_seconds = config.getint("Monitor", "csvReloadSeconds", fallback=30)
         self.alert_resend_interval = config.getint("Monitor", "alertResendInterval", fallback=1800)
+        self.dynamic_window = config.getint("Monitor", "DynamicWindow", fallback=24)
+        self.dynamic_k = config.getfloat("Monitor", "DynamicK", fallback=3.0)
 
         # 全域派報設定
         self.global_mail_to = [x.strip() for x in config.get("Mail", "To", fallback="").split(",") if x.strip()]
@@ -180,11 +182,9 @@ class MonitorManager:
             else:
                 server_name = self.config.get(section, "ServerName", fallback="KepwareAPI").strip()
 
-            keywords_raw = self.config.get(
-                section, "CriticalKeywords",
-                fallback="Runtime stopped,License error,Server shutdown"
-            )
-            keywords = [k.strip() for k in keywords_raw.split(",") if k.strip()]
+            def _parse_kw(key, fallback):
+                raw = self.config.get(section, key, fallback=fallback)
+                return [k.strip() for k in raw.split(",") if k.strip()]
 
             svc = KepwareLogService(
                 server_name=server_name,
@@ -199,7 +199,17 @@ class MonitorManager:
                 channel_alert_threshold=self.config.getint(section, "ChannelAlertThreshold", fallback=5),
                 tag_error_consecutive=self.config.getint(section, "TagErrorConsecutive", fallback=6),
                 retention_days=self.config.getint(section, "RetentionDays", fallback=90),
-                critical_keywords=keywords,
+                critical_keywords=_parse_kw("CriticalKeywords",
+                                            "Runtime stopped,License error,Server shutdown"),
+                severity_critical=_parse_kw("SeverityCritical",
+                                            "Device not responding"),
+                severity_warning=_parse_kw("SeverityWarning",
+                                           "Timeout,Add item failed"),
+                severity_advisory=_parse_kw("SeverityAdvisory",
+                                            "Failed to remove item"),
+                adaptive_baseline_days=self.config.getint(section, "AdaptiveBaselineDays", fallback=7),
+                adaptive_multiplier=self.config.getfloat(section, "AdaptiveMultiplier", fallback=3.0),
+                adaptive_min_threshold=self.config.getint(section, "AdaptiveMinThreshold", fallback=3),
                 mail_to=mail_to,
                 mail_cc=mail_cc,
                 event_subject=self.config.get(section, "EventSubject",
@@ -443,6 +453,42 @@ class MonitorManager:
             return False, val
 
         return False, None
+
+    def _evaluate_dynamic(self, device, raw_value, conn_name):
+        import statistics as _stats
+        try:
+            val = float(raw_value)
+        except (TypeError, ValueError):
+            return False, None
+
+        server_name = conn_name if len(self.connections) > 1 else None
+        history = self.db.get_recent_device_values(
+            device_name=device.name, server_name=server_name,
+            limit=self.dynamic_window,
+        )
+
+        if len(history) < 3:
+            return False, val
+
+        mean = _stats.mean(history)
+        stdev = _stats.stdev(history)
+
+        k = float(device.threshold) if device.threshold is not None else self.dynamic_k
+
+        if stdev == 0:
+            is_alert = val != mean
+        else:
+            is_alert = abs(val - mean) > k * stdev
+
+        if is_alert:
+            logging.info(f"[{conn_name}] {device.name} 動態閥值觸發: "
+                         f"val={val}, mean={mean:.2f}, σ={stdev:.2f}, "
+                         f"k={k}, 偏離={abs(val - mean) / stdev:.1f}σ"
+                         if stdev > 0 else
+                         f"[{conn_name}] {device.name} 動態閥值觸發: "
+                         f"val={val}, mean={mean}, 值已變化")
+
+        return is_alert, val
 
     # ===========================================
     # 派報
@@ -793,7 +839,10 @@ class MonitorManager:
                     device.last_alert_time = current_ts
             return
 
-        is_alert, parsed_value = self.evaluate(device, raw_value)
+        if device.condition == "dynamic":
+            is_alert, parsed_value = self._evaluate_dynamic(device, raw_value, conn_name)
+        else:
+            is_alert, parsed_value = self.evaluate(device, raw_value)
         write_val = parsed_value if parsed_value is not None else raw_value
 
         # 更新上一次讀取值（供 unchanged 條件使用）

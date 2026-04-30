@@ -5,7 +5,8 @@
 ## 功能特色
 
 - **多台 Kepware Server** — 同時監控多台 OPC UA Server
-- **彈性閾值設定** — 支援數值比較（大於/小於/等於）、布林判斷、數值不變偵測、純記錄模式
+- **彈性閾值設定** — 支援數值比較（大於/小於/等於）、布林判斷、數值不變偵測、動態閥值（移動平均 ± k*σ）、純記錄模式
+- **Kepware Event Log 監控** — 整合 Kepware API Gateway，自動分類事件嚴重等級（Critical/Warning/Advisory），自適應閥值派報，統計圖表可視化
 - **累積觸發機制** — 連續 N 次異常才派報，避免瞬間抖動誤報
 - **復歸通知** — 設備恢復正常時自動發送復歸通知
 - **三層式網路診斷** — Ping 主機、TCP Port 檢測、設備 IP 檢測，定位斷線層級
@@ -25,6 +26,7 @@ KepwareMonitorOPC/
 ├── ase_email_service.py      # Email 派報服務
 ├── webhook_service.py        # Webhook 推播服務
 ├── diagnostic_service.py     # 三層式網路診斷
+├── kepware_log_service.py    # Kepware Event Log 監控服務
 ├── db_service.py             # SQLite 資料庫服務
 ├── requirements.txt          # Python 套件相依
 ├── Config/
@@ -66,7 +68,7 @@ cp Config/tags.example.csv Config/tags.csv
 | MailTo | 指定收件人（選填，覆蓋全域） | user@company.com |
 | MailCc | 指定副本（選填） | |
 | Type | 監控類型：number / bool / log | number |
-| Condition | 比較條件：greater / less / equal / not_equal / unchanged | greater |
+| Condition | 比較條件：greater / less / equal / not_equal / unchanged / dynamic | greater |
 | Threshold | 閾值 | 300 |
 | CountNeeded | 累積幾次才派報 | 1 |
 | Enable | 是否啟用：TRUE / FALSE | TRUE |
@@ -218,48 +220,129 @@ Port = 8080
 
 將 `iFIX/IGS 機台`、`IGS 服務` 替換為你實際的設備名稱即可。
 
-## 規劃中功能（待 Kepware API 服務站台上線）
+## Kepware Event Log 監控
 
-本專案預計透過獨立的 Kepware API 服務站台間接存取 Kepware Configuration API，不直接連線 Kepware 主機。
+透過獨立的 Kepware API Gateway 服務，定期 polling 事件與交易紀錄，自動分類嚴重等級並依規則派報。
 
 ### 架構
 
 ```
 Kepware Server A / B
     ↕
-Kepware API 服務站台（獨立專案）    ← 負責與 Kepware Config API 溝通
-    ↕  統一 REST API
-本專案（KepwareMonitorOPC）         ← 呼叫服務站台 API + Web UI 顯示
+Kepware API Gateway（獨立服務，每台 Kepware 各一個）
+    ↕  REST API + JWT 認證
+本專案（KepwareMonitorOPC）
+    ├→ 定期 polling events / transactions
+    ├→ 事件分類 + 去重 + 異常偵測
+    ├→ 派報（Email / Webhook）
+    └→ Web UI 查詢 + 統計圖表
 ```
 
-### 新增分頁
+### 事件嚴重等級分類規則
 
-| 分頁 | 功能 | 說明 |
-|------|------|------|
-| **Kepware 事件** | Event Log 瀏覽、Channel 錯誤統計、Tag 錯誤 Top 10 | 累積達門檻自動派報 |
-| **Kepware 管理** | 服務狀態監控、Channel 啟用/停用、設備設定管理 | 免連線 Kepware 主機即可操作 |
+系統根據事件 `message` 內容中的關鍵字，自動分類為以下嚴重等級：
 
-### 派報邏輯
+| 等級 (severity) | 關鍵字 | 說明 | 派報行為 |
+|-----------------|--------|------|---------|
+| **Critical** | `Device not responding` | 物理斷線 / 設備斷電 | 立即派報（1 次即觸發） |
+| **Warning** | `Timeout`、`Add item failed` | 通訊擁塞 / 連線數過載 | 自適應閥值（學習正常基準後判斷） |
+| **Advisory** | `Failed to remove item` | 系統資源未釋放 | 僅記錄，不派報 |
+| **Unclassified** | （不符合以上任何關鍵字） | 其他事件 | 固定閥值（預設 5 次 / 小時） |
 
-| 事件類型 | 條件 | 動作 |
-|---------|------|------|
-| Channel 錯誤 | 1 小時內累積 ≥ 5 次 | Email + Webhook |
-| 服務層級事件（Runtime stopped 等） | 出現 1 次 | 立即 Email + Webhook |
-| Tag 錯誤 | 不限 | 僅記錄，Web UI 可查 |
+> **注意：** severity 欄位是本系統的二次分類，與 Kepware 原始的 event 等級（Error / Warning / Info）獨立存在，不會混淆。
 
-### 預計設定
+#### 關鍵字設定
+
+分類關鍵字可在 `settings.ini` 中自行擴充：
 
 ```ini
-[KepwareLog]
-Enable = false
-ApiBaseUrl = http://your-api-service/api/kepware
-PollInterval = 600
-ChannelAlertWindow = 3600
-ChannelAlertThreshold = 5
-CriticalKeywords = Runtime stopped,License error,Server shutdown
+[KepwareLog.kepware_a]
+SeverityCritical = Device not responding
+SeverityWarning = Timeout,Add item failed
+SeverityAdvisory = Failed to remove item
 ```
 
-> 特定 Tag 若需要派報，可透過現有 `tags.csv` 的 OPC 監控機制處理，不需在此重複設定。
+另有 `CriticalKeywords`（如 `Runtime stopped, License error, Server shutdown`）為**不分等級的即時告警**，命中即立即派報。
+
+### 自適應閥值
+
+Warning 等級事件使用自適應閥值，避免固定門檻無法適應不同環境：
+
+```
+告警門檻 = max(過去 N 天每小時平均錯誤數 × 倍數, 最低門檻)
+```
+
+| 參數 | 設定鍵 | 預設值 | 說明 |
+|------|--------|--------|------|
+| 學習窗口 | `AdaptiveBaselineDays` | 7 天 | 從 DB 取過去 N 天的數據 |
+| 倍數 | `AdaptiveMultiplier` | 3.0 | 超過基準 × 倍數才告警 |
+| 最低門檻 | `AdaptiveMinThreshold` | 3 次/小時 | 避免基準太低而過度敏感 |
+| 重算頻率 | — | 每 24 小時 | 自動重新計算基準線 |
+
+### Tag 讀取異常偵測
+
+系統自動解析事件 message 中的 `Channel.Device` 和 `Tag address`：
+
+```
+K12GMSIFIX.GMS | Add item failed on device. | Tag address = 'ns=2;s=11$AA...', Status code = 0X808D0000.
+  ↑ Channel   ↑ Device                        ↑ Tag Address
+```
+
+同一 Channel.Device 連續出現 Warning/Error 事件達門檻（預設 6 次）時派報。
+
+### 設定範例
+
+```ini
+# 每台 Kepware 各一個 section
+[KepwareLog.kepware_a]
+Enable = true
+ApiBaseUrl = http://192.168.1.10:8000
+Username = admin
+Password = your_password
+EventSubject = Kepware 事件監控通知
+PollInterval = 600
+```
+
+### Web UI 功能
+
+| Tab | 說明 |
+|-----|------|
+| 事件記錄 | 依日期/Channel/事件等級/嚴重等級篩選，顯示 Server、Severity、Tag Address |
+| 操作記錄 | Kepware Config API 操作紀錄（GET/POST/PUT/DELETE） |
+| 統計圖表 | 每日事件趨勢（依嚴重等級堆疊）、Channel 事件分佈（水平柱狀圖） |
+
+## 動態閥值（Tag 監控）
+
+適用於監控 Kepware 連線數、通訊狀態等會隨環境波動的指標。
+
+### 原理
+
+使用移動平均 ± k 倍標準差偵測異常：
+
+```
+基準線 = 過去 N 筆歷史讀值的平均值 (μ)
+標準差 = 過去 N 筆歷史讀值的標準差 (σ)
+當 |當前值 - μ| > k × σ 時觸發告警
+```
+
+### CSV 設定
+
+```csv
+Name,NodeId,Type,Condition,Threshold,CountNeeded,Enable
+連線數,ns=2;s=...,number,dynamic,3,2,TRUE
+```
+
+- `Condition = dynamic` — 啟用動態閥值
+- `Threshold = 3` — k 值（幾倍標準差，可選，預設取 `[Monitor] DynamicK`）
+- `CountNeeded` — 連續幾次偏離才派報
+
+### 全域設定
+
+```ini
+[Monitor]
+DynamicWindow = 24    # 回看歷史筆數
+DynamicK = 3.0        # 預設 k 值
+```
 
 ## License
 
