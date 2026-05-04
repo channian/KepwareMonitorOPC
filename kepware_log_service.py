@@ -73,7 +73,7 @@ class KepwareLogService:
         self._last_event_ts = None
         self._last_tx_ts = None
         self._alerted_channels = {}
-        self._alerted_tags = set()
+        self._alerted_tags = {}
         self._channel_baselines = {}
 
         logging.info(f"KepwareLogService[{self.server_name}] 初始化: "
@@ -268,8 +268,10 @@ class KepwareLogService:
         if channel:
             if severity == "Warning":
                 threshold = self._get_adaptive_threshold(channel)
+                threshold_label = f"自適應閥值 {threshold:.0f}"
             else:
                 threshold = self.channel_alert_threshold
+                threshold_label = f"固定閥值 {threshold}"
 
             window_start = (
                 datetime.fromisoformat(timestamp) - timedelta(seconds=self.channel_alert_window)
@@ -283,7 +285,10 @@ class KepwareLogService:
                 last_alerted = self._alerted_channels.get(alert_key)
                 if not last_alerted or (now - last_alerted).total_seconds() > self.channel_alert_window:
                     self._alerted_channels[alert_key] = now
-                    self._send_channel_alert(channel, count, timestamp)
+                    self._send_channel_alert(
+                        channel, count, timestamp, severity,
+                        threshold, threshold_label, message,
+                    )
                 return True, "channel_adaptive" if severity == "Warning" else "channel_threshold"
 
         if channel and device:
@@ -292,9 +297,11 @@ class KepwareLogService:
 
             if consecutive >= self.tag_error_consecutive:
                 tag_key = f"tag:{channel}.{device}"
-                if tag_key not in self._alerted_tags:
-                    self._alerted_tags.add(tag_key)
-                    self._send_tag_alert(channel, device, consecutive, timestamp, tag_address)
+                now = datetime.now()
+                last_alerted = self._alerted_tags.get(tag_key)
+                if not last_alerted or (now - last_alerted).total_seconds() > self.channel_alert_window:
+                    self._alerted_tags[tag_key] = now
+                    self._send_tag_alert(channel, device, consecutive, timestamp, tag_address, message)
                 return True, "tag_consecutive"
 
         return False, None
@@ -303,76 +310,129 @@ class KepwareLogService:
     # 派報
     # ===========================================
 
+    _SEVERITY_COLORS = {
+        "Critical": ("#dc3545", "#fdf2f2"),
+        "Warning":  ("#f59e0b", "#fefce8"),
+        "Advisory": ("#3b82f6", "#eff6ff"),
+    }
+
+    @staticmethod
+    def _build_email_html(badge_color, badge_bg, badge_text, title,
+                          rows, message="", footer=""):
+        rows_html = ""
+        for label, value in rows:
+            rows_html += (
+                f'<tr><td style="padding:6px 12px;font-weight:bold;'
+                f'white-space:nowrap;vertical-align:top;">{label}</td>'
+                f'<td style="padding:6px 12px;">{value}</td></tr>'
+            )
+        msg_html = ""
+        if message:
+            msg_html = (
+                f'<div style="margin:16px 0;padding:12px 16px;'
+                f'background:#f8f9fa;border-left:4px solid {badge_color};'
+                f'font-family:monospace;font-size:13px;word-break:break-all;">'
+                f'{message}</div>'
+            )
+        return f"""<html><body style="font-family:Arial,sans-serif;color:#333;margin:0;padding:0;">
+<div style="max-width:640px;margin:20px auto;">
+  <div style="padding:12px 20px;background:{badge_bg};border-left:5px solid {badge_color};margin-bottom:16px;">
+    <span style="display:inline-block;padding:2px 10px;background:{badge_color};color:#fff;
+          border-radius:3px;font-size:12px;font-weight:bold;letter-spacing:1px;">{badge_text}</span>
+    <span style="margin-left:10px;font-size:16px;font-weight:bold;color:{badge_color};">{title}</span>
+  </div>
+  <table style="border-collapse:collapse;width:100%;font-size:14px;">
+    {rows_html}
+  </table>
+  {msg_html}
+  <hr style="border:none;border-top:1px solid #e0e0e0;margin:16px 0;">
+  <p style="font-size:13px;color:#666;">{footer}</p>
+</div>
+</body></html>"""
+
     def _send_critical_alert(self, event_type, message, timestamp):
         subject = f"[緊急] {self.mail_subject} - [{self.server_name}] 關鍵事件"
-        html_body = f"""
-        <html><body>
-            <h2 style="color: #dc3545;">Kepware 關鍵事件告警</h2>
-            <p><strong>Kepware Server:</strong> {self.server_name}</p>
-            <p><strong>時間:</strong> {timestamp}</p>
-            <p><strong>事件等級:</strong> {event_type}</p>
-            <p><strong>訊息:</strong></p>
-            <p style="font-size:1.1em;font-weight:bold;color:#dc3545;">{message}</p>
-            <hr><p>此事件符合關鍵字即時告警條件，請立即確認。</p>
-        </body></html>
-        """
+        color, bg = self._SEVERITY_COLORS["Critical"]
+        html_body = self._build_email_html(
+            badge_color=color, badge_bg=bg,
+            badge_text="CRITICAL", title="關鍵事件告警",
+            rows=[
+                ("Server", self.server_name),
+                ("時間", timestamp),
+                ("事件等級", event_type),
+            ],
+            message=message,
+            footer="此事件符合關鍵字即時告警條件，請立即確認設備狀態。",
+        )
         self._do_send_alert(subject, html_body, "kepware_critical", message)
 
-    def _send_channel_alert(self, channel, count, timestamp):
+    def _send_channel_alert(self, channel, count, timestamp, severity,
+                            threshold, threshold_label, message=""):
         window_min = self.channel_alert_window // 60
         subject = f"[異常] {self.mail_subject} - [{self.server_name}] Channel {channel} 通訊異常"
-        html_body = f"""
-        <html><body>
-            <h2 style="color: #dc3545;">Kepware Channel 通訊異常</h2>
-            <p><strong>Kepware Server:</strong> {self.server_name}</p>
-            <p><strong>時間:</strong> {timestamp}</p>
-            <p><strong>Channel:</strong> {channel}</p>
-            <p><strong>累積次數:</strong>
-               <span style="font-size:1.2em;font-weight:bold;color:#dc3545;">
-               {count} 次 / {window_min} 分鐘</span></p>
-            <p><strong>門檻:</strong> {self.channel_alert_threshold} 次 / {window_min} 分鐘</p>
-            <hr><p>Channel 通訊錯誤累積已達門檻，請確認設備連線狀態。</p>
-        </body></html>
-        """
+        color, bg = self._SEVERITY_COLORS.get(severity, ("#6b7280", "#f3f4f6"))
+        html_body = self._build_email_html(
+            badge_color=color, badge_bg=bg,
+            badge_text=severity.upper(), title=f"Channel {channel} 通訊異常",
+            rows=[
+                ("Server", self.server_name),
+                ("時間", timestamp),
+                ("Channel", channel),
+                ("嚴重等級", severity),
+                ("累積次數",
+                 f'<span style="font-size:1.1em;font-weight:bold;color:{color};">'
+                 f'{count} 次 / {window_min} 分鐘</span>'),
+                ("告警門檻",
+                 f'{threshold_label} — {threshold:.0f} 次 / {window_min} 分鐘'),
+            ],
+            message=message,
+            footer="Channel 通訊錯誤累積已達門檻，請確認設備連線狀態。",
+        )
         self._do_send_alert(subject, html_body, "kepware_channel", channel)
 
-    def _send_tag_alert(self, channel, device, count, timestamp, tag_address=""):
+    def _send_tag_alert(self, channel, device, count, timestamp,
+                        tag_address="", message=""):
         tag_name = f"{channel}.{device}"
         subject = f"[異常] {self.mail_subject} - [{self.server_name}] Tag {tag_name} 讀取異常"
-        tag_addr_html = ""
+        color, bg = self._SEVERITY_COLORS["Warning"]
+        rows = [
+            ("Server", self.server_name),
+            ("時間", timestamp),
+            ("Channel.Device", tag_name),
+        ]
         if tag_address:
-            tag_addr_html = f"<p><strong>Tag Address:</strong> <code>{tag_address}</code></p>"
-        html_body = f"""
-        <html><body>
-            <h2 style="color: #dc3545;">Kepware Tag 讀取異常</h2>
-            <p><strong>Kepware Server:</strong> {self.server_name}</p>
-            <p><strong>時間:</strong> {timestamp}</p>
-            <p><strong>Channel.Device:</strong> {tag_name}</p>
-            {tag_addr_html}
-            <p><strong>連續失敗次數:</strong>
-               <span style="font-size:1.2em;font-weight:bold;color:#dc3545;">
-               {count} 次</span></p>
-            <p><strong>門檻:</strong> {self.tag_error_consecutive} 次</p>
-            <hr><p>Tag 連續讀取失敗已達門檻，請確認點位設定或設備狀態。</p>
-        </body></html>
-        """
+            rows.append(("Tag Address", f'<code>{tag_address}</code>'))
+        rows += [
+            ("連續失敗",
+             f'<span style="font-size:1.1em;font-weight:bold;color:{color};">'
+             f'{count} 次</span>'),
+            ("告警門檻", f'{self.tag_error_consecutive} 次'),
+        ]
+        html_body = self._build_email_html(
+            badge_color=color, badge_bg=bg,
+            badge_text="TAG ERROR", title=f"Tag {tag_name} 讀取異常",
+            rows=rows,
+            message=message,
+            footer="Tag 連續讀取失敗已達門檻，請確認點位設定或設備狀態。",
+        )
         self._do_send_alert(subject, html_body, "kepware_tag", tag_name)
 
     def _send_transaction_alert(self, tx):
         subject = f"[操作] {self.mail_subject} - [{self.server_name}] DELETE 操作通知"
-        html_body = f"""
-        <html><body>
-            <h2 style="color: #f59e0b;">Kepware 設定刪除操作通知</h2>
-            <p><strong>Kepware Server:</strong> {self.server_name}</p>
-            <p><strong>時間:</strong> {tx.get('timestamp')}</p>
-            <p><strong>操作者:</strong> {tx.get('user')}</p>
-            <p><strong>操作:</strong> DELETE</p>
-            <p><strong>目標:</strong> {tx.get('endpoint')}</p>
-            <p><strong>來源 IP:</strong> {tx.get('source')}</p>
-            <p><strong>回應碼:</strong> {tx.get('response')}</p>
-            <hr><p>有人對 Kepware 執行了刪除操作，請確認是否為預期行為。</p>
-        </body></html>
-        """
+        html_body = self._build_email_html(
+            badge_color="#f59e0b", badge_bg="#fefce8",
+            badge_text="DELETE", title="設定刪除操作通知",
+            rows=[
+                ("Server", self.server_name),
+                ("時間", tx.get("timestamp", "")),
+                ("操作者", tx.get("user", "")),
+                ("操作", "DELETE"),
+                ("目標", f'<code>{tx.get("endpoint", "")}</code>'),
+                ("來源 IP", tx.get("source", "")),
+                ("回應碼", str(tx.get("response", ""))),
+            ],
+            footer="有人對 Kepware 執行了刪除操作，請確認是否為預期行為。",
+        )
         self._do_send_alert(subject, html_body, "kepware_delete",
                             f"{tx.get('user')} DELETE {tx.get('endpoint')}")
 
