@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "fp=$(python3 -c \"import sys,json; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('file_path',''))\"); if [[ \"$fp\" == *.py ]]; then python3 -m py_compile \"$fp\" && echo \"[py_compile] OK: $fp\" || echo \"[py_compile] SYNTAX ERROR: $fp\"; fi",
+            "statusMessage": "Python 語法檢查中..."
+          }
+        ]
+      }
+    ]
+  }
+}
