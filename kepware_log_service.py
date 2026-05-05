@@ -13,7 +13,8 @@ class KepwareLogService:
       - JWT 認證 + 自動重新登入
       - 定期 polling events 和 transactions
       - 去重（timestamp + hash）
-      - 異常判斷與派報觸發
+      - CriticalKeywords / Critical severity → 立即派報
+      - 其餘事件僅記錄，每日 23:50 彙整報告
       - 支援多台 Kepware（每台獨立 section: [KepwareLog.server_name]）
     """
 
@@ -28,15 +29,12 @@ class KepwareLogService:
 
     def __init__(self, server_name, base_url, username, password,
                  db_service, email_service, webhook_service=None,
-                 poll_interval=600,
-                 channel_alert_window=3600, channel_alert_threshold=5,
-                 tag_error_consecutive=6, retention_days=90,
+                 poll_interval=600, retention_days=90,
                  critical_keywords=None,
                  severity_critical=None, severity_warning=None,
                  severity_advisory=None,
-                 adaptive_baseline_days=7, adaptive_multiplier=3.0,
-                 adaptive_min_threshold=3,
-                 mail_to=None, mail_cc=None, event_subject=None):
+                 mail_to=None, mail_cc=None, event_subject=None,
+                 **_ignored):
         self.server_name = server_name
         self.db = db_service
         self.email_service = email_service
@@ -46,10 +44,6 @@ class KepwareLogService:
         self.username = username
         self.password = password
         self.poll_interval = poll_interval
-
-        self.channel_alert_window = channel_alert_window
-        self.channel_alert_threshold = channel_alert_threshold
-        self.tag_error_consecutive = tag_error_consecutive
         self.retention_days = retention_days
 
         self.critical_keywords = critical_keywords or [
@@ -60,10 +54,6 @@ class KepwareLogService:
         self.severity_warning = severity_warning or self.DEFAULT_SEVERITY_WARNING
         self.severity_advisory = severity_advisory or self.DEFAULT_SEVERITY_ADVISORY
 
-        self.adaptive_baseline_days = adaptive_baseline_days
-        self.adaptive_multiplier = adaptive_multiplier
-        self.adaptive_min_threshold = adaptive_min_threshold
-
         self.global_mail_to = mail_to or []
         self.global_mail_cc = mail_cc or []
         self.mail_subject = event_subject or "Kepware 事件監控通知"
@@ -72,14 +62,10 @@ class KepwareLogService:
         self._headers = {}
         self._last_event_ts = None
         self._last_tx_ts = None
-        self._alerted_channels = {}
-        self._alerted_tags = {}
-        self._channel_baselines = {}
+        self._daily_summary_sent = None
 
         logging.info(f"KepwareLogService[{self.server_name}] 初始化: "
-                     f"base_url={self.base_url}, poll={self.poll_interval}s, "
-                     f"adaptive={self.adaptive_multiplier}x/{self.adaptive_baseline_days}d, "
-                     f"tag_consecutive={self.tag_error_consecutive}")
+                     f"base_url={self.base_url}, poll={self.poll_interval}s")
 
     # ===========================================
     # JWT 認證
@@ -123,6 +109,7 @@ class KepwareLogService:
         try:
             self._poll_events()
             self._poll_transactions()
+            self._check_daily_summary()
         except Exception as ex:
             logging.error(f"KepwareLogService[{self.server_name}] polling 失敗: {ex}")
 
@@ -146,7 +133,7 @@ class KepwareLogService:
             severity = self._classify_severity(message)
 
             is_alert, alert_type = self._evaluate_event(
-                event_type, message, channel, device, ts, severity
+                event_type, message, severity
             )
 
             self.db.write_kepware_event(
@@ -213,7 +200,7 @@ class KepwareLogService:
         return m.group(1) if m else ""
 
     # ===========================================
-    # 事件分類 & 自適應閥值
+    # 事件分類
     # ===========================================
 
     def _classify_severity(self, message):
@@ -229,82 +216,155 @@ class KepwareLogService:
                 return "Advisory"
         return "Unclassified"
 
-    def _get_adaptive_threshold(self, channel):
-        baseline = self._channel_baselines.get(channel)
-        now = datetime.now()
-        if baseline and (now - baseline["ts"]).total_seconds() < 86400:
-            return baseline["threshold"]
-
-        avg_hourly = self.db.get_channel_hourly_error_rate(
-            channel, days=self.adaptive_baseline_days
-        )
-        threshold = max(avg_hourly * self.adaptive_multiplier,
-                        self.adaptive_min_threshold)
-        self._channel_baselines[channel] = {"threshold": threshold, "ts": now}
-        logging.info(f"KepwareLogService[{self.server_name}] "
-                     f"Channel {channel} 自適應閥值: {threshold:.1f}/hr "
-                     f"(基準 {avg_hourly:.2f}/hr × {self.adaptive_multiplier})")
-        return threshold
-
-    def _evaluate_event(self, event_type, message, channel, device,
-                        timestamp, severity):
+    def _evaluate_event(self, event_type, message, severity):
         if event_type not in ("Warning", "Error"):
             return False, None
 
-        tag_address = self._parse_tag_address(message)
-
         if severity == "Critical":
-            self._send_critical_alert(event_type, message, timestamp)
+            self._send_critical_alert(event_type, message,
+                                      datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             return True, "critical_event"
 
         for kw in self.critical_keywords:
             if kw.lower() in message.lower():
-                self._send_critical_alert(event_type, message, timestamp)
+                self._send_critical_alert(event_type, message,
+                                          datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
                 return True, "critical_keyword"
 
-        if severity == "Advisory":
-            return False, None
-
-        if channel:
-            if severity == "Warning":
-                threshold = self._get_adaptive_threshold(channel)
-                threshold_label = f"自適應閥值 {threshold:.0f}"
-            else:
-                threshold = self.channel_alert_threshold
-                threshold_label = f"固定閥值 {threshold}"
-
-            window_start = (
-                datetime.fromisoformat(timestamp) - timedelta(seconds=self.channel_alert_window)
-            ).isoformat()
-            count = self.db.count_channel_events_in_window(channel, window_start)
-            count += 1
-
-            if count >= threshold:
-                alert_key = f"channel:{channel}"
-                now = datetime.now()
-                last_alerted = self._alerted_channels.get(alert_key)
-                if not last_alerted or (now - last_alerted).total_seconds() > self.channel_alert_window:
-                    self._alerted_channels[alert_key] = now
-                    self._send_channel_alert(
-                        channel, count, timestamp, severity,
-                        threshold, threshold_label, message,
-                    )
-                return True, "channel_adaptive" if severity == "Warning" else "channel_threshold"
-
-        if channel and device:
-            consecutive = self.db.count_consecutive_tag_errors(channel, device)
-            consecutive += 1
-
-            if consecutive >= self.tag_error_consecutive:
-                tag_key = f"tag:{channel}.{device}"
-                now = datetime.now()
-                last_alerted = self._alerted_tags.get(tag_key)
-                if not last_alerted or (now - last_alerted).total_seconds() > self.channel_alert_window:
-                    self._alerted_tags[tag_key] = now
-                    self._send_tag_alert(channel, device, consecutive, timestamp, tag_address, message)
-                return True, "tag_consecutive"
-
         return False, None
+
+    # ===========================================
+    # 每日彙整報告（23:50）
+    # ===========================================
+
+    def _check_daily_summary(self):
+        now = datetime.now()
+        if now.hour == 23 and now.minute >= 50:
+            today_str = now.strftime("%Y-%m-%d")
+            if self._daily_summary_sent == today_str:
+                return
+            self._daily_summary_sent = today_str
+            try:
+                self._send_daily_summary(today_str)
+            except Exception as ex:
+                logging.error(f"KepwareLogService[{self.server_name}] "
+                              f"每日彙整失敗: {ex}")
+
+    def _send_daily_summary(self, date_str):
+        summary = self.db.get_daily_event_summary(date_str, self.server_name)
+
+        if summary["today_total"] == 0:
+            logging.info(f"KepwareLogService[{self.server_name}] "
+                         f"每日彙整: {date_str} 無異常事件，不發送")
+            return
+
+        sc = summary["severity_counts"]
+        avg = summary["avg_daily_7d"]
+        today = summary["today_total"]
+
+        if avg > 0:
+            pct = ((today - avg) / avg) * 100
+            if pct > 0:
+                trend = f"↑ {pct:.0f}% (7日均值 {avg:.0f})"
+            elif pct < 0:
+                trend = f"↓ {abs(pct):.0f}% (7日均值 {avg:.0f})"
+            else:
+                trend = f"— 持平 (7日均值 {avg:.0f})"
+        else:
+            trend = "無歷史資料"
+
+        sev_html = ""
+        sev_colors = {"Critical": "#dc3545", "Warning": "#f59e0b",
+                      "Advisory": "#3b82f6", "Unclassified": "#6b7280"}
+        for sev in ("Critical", "Warning", "Advisory", "Unclassified"):
+            cnt = sc.get(sev, 0)
+            if cnt == 0:
+                continue
+            color = sev_colors[sev]
+            sev_html += (
+                f'<span style="display:inline-block;margin:2px 6px 2px 0;'
+                f'padding:3px 10px;background:{color};color:#fff;'
+                f'border-radius:3px;font-size:13px;">'
+                f'{sev} {cnt}</span>'
+            )
+
+        ch_html = ""
+        if summary["top_channels"]:
+            ch_html = ('<table style="border-collapse:collapse;width:100%;'
+                       'font-size:13px;margin-top:8px;">'
+                       '<tr style="background:#f3f4f6;">'
+                       '<th style="padding:6px 10px;text-align:left;">Channel</th>'
+                       '<th style="padding:6px 10px;text-align:right;">Critical</th>'
+                       '<th style="padding:6px 10px;text-align:right;">Warning</th>'
+                       '<th style="padding:6px 10px;text-align:right;">Advisory</th>'
+                       '<th style="padding:6px 10px;text-align:right;">Other</th>'
+                       '<th style="padding:6px 10px;text-align:right;">Total</th></tr>')
+            for ch in summary["top_channels"]:
+                ch_html += (
+                    f'<tr><td style="padding:4px 10px;">{ch["channel"]}</td>'
+                    f'<td style="padding:4px 10px;text-align:right;">{ch["Critical"]}</td>'
+                    f'<td style="padding:4px 10px;text-align:right;">{ch["Warning"]}</td>'
+                    f'<td style="padding:4px 10px;text-align:right;">{ch["Advisory"]}</td>'
+                    f'<td style="padding:4px 10px;text-align:right;">{ch["Unclassified"]}</td>'
+                    f'<td style="padding:4px 10px;text-align:right;font-weight:bold;">'
+                    f'{ch["total"]}</td></tr>'
+                )
+            ch_html += "</table>"
+
+        tag_html = ""
+        if summary["top_tags"]:
+            tag_html = ('<table style="border-collapse:collapse;width:100%;'
+                        'font-size:13px;margin-top:8px;">'
+                        '<tr style="background:#f3f4f6;">'
+                        '<th style="padding:6px 10px;text-align:left;">Channel.Device</th>'
+                        '<th style="padding:6px 10px;text-align:left;">Tag Address</th>'
+                        '<th style="padding:6px 10px;text-align:right;">次數</th></tr>')
+            for t in summary["top_tags"]:
+                tag_html += (
+                    f'<tr><td style="padding:4px 10px;">'
+                    f'{t["channel"]}.{t["device"]}</td>'
+                    f'<td style="padding:4px 10px;font-family:monospace;font-size:12px;">'
+                    f'{t["tag_address"]}</td>'
+                    f'<td style="padding:4px 10px;text-align:right;">{t["cnt"]}</td></tr>'
+                )
+            tag_html += "</table>"
+
+        subject = f"[日報] {self.mail_subject} - [{self.server_name}] {date_str}"
+
+        html_body = f"""<html><body style="font-family:Arial,sans-serif;color:#333;margin:0;padding:0;">
+<div style="max-width:700px;margin:20px auto;">
+  <div style="padding:12px 20px;background:#f0f9ff;border-left:5px solid #2563eb;margin-bottom:16px;">
+    <span style="font-size:16px;font-weight:bold;color:#2563eb;">
+      Kepware 事件日報 — {self.server_name}</span>
+    <span style="float:right;color:#666;">{date_str}</span>
+  </div>
+
+  <table style="border-collapse:collapse;width:100%;font-size:14px;">
+    <tr><td style="padding:6px 12px;font-weight:bold;">總異常事件</td>
+        <td style="padding:6px 12px;">
+          <span style="font-size:1.2em;font-weight:bold;">{today}</span> 筆</td></tr>
+    <tr><td style="padding:6px 12px;font-weight:bold;">趨勢</td>
+        <td style="padding:6px 12px;">{trend}</td></tr>
+    <tr><td style="padding:6px 12px;font-weight:bold;">嚴重等級分佈</td>
+        <td style="padding:6px 12px;">{sev_html}</td></tr>
+  </table>
+
+  <h3 style="font-size:14px;color:#333;margin:20px 0 8px;">Channel 異常排行</h3>
+  {ch_html if ch_html else '<p style="color:#999;font-size:13px;">無 Channel 異常</p>'}
+
+  <h3 style="font-size:14px;color:#333;margin:20px 0 8px;">Tag 讀取異常</h3>
+  {tag_html if tag_html else '<p style="color:#999;font-size:13px;">無 Tag 讀取異常</p>'}
+
+  <hr style="border:none;border-top:1px solid #e0e0e0;margin:20px 0;">
+  <p style="font-size:12px;color:#999;">
+    此為每日自動彙整報告，詳細紀錄請至 Web UI 查詢。</p>
+</div>
+</body></html>"""
+
+        self._do_send_alert(subject, html_body, "kepware_daily_summary",
+                            f"{date_str} total={today}")
+        logging.info(f"KepwareLogService[{self.server_name}] "
+                     f"每日彙整已發送: {date_str}, 事件={today}")
 
     # ===========================================
     # 派報
@@ -366,57 +426,6 @@ class KepwareLogService:
         )
         self._do_send_alert(subject, html_body, "kepware_critical", message)
 
-    def _send_channel_alert(self, channel, count, timestamp, severity,
-                            threshold, threshold_label, message=""):
-        window_min = self.channel_alert_window // 60
-        subject = f"[異常] {self.mail_subject} - [{self.server_name}] Channel {channel} 通訊異常"
-        color, bg = self._SEVERITY_COLORS.get(severity, ("#6b7280", "#f3f4f6"))
-        html_body = self._build_email_html(
-            badge_color=color, badge_bg=bg,
-            badge_text=severity.upper(), title=f"Channel {channel} 通訊異常",
-            rows=[
-                ("Server", self.server_name),
-                ("時間", timestamp),
-                ("Channel", channel),
-                ("嚴重等級", severity),
-                ("累積次數",
-                 f'<span style="font-size:1.1em;font-weight:bold;color:{color};">'
-                 f'{count} 次 / {window_min} 分鐘</span>'),
-                ("告警門檻",
-                 f'{threshold_label} — {threshold:.0f} 次 / {window_min} 分鐘'),
-            ],
-            message=message,
-            footer="Channel 通訊錯誤累積已達門檻，請確認設備連線狀態。",
-        )
-        self._do_send_alert(subject, html_body, "kepware_channel", channel)
-
-    def _send_tag_alert(self, channel, device, count, timestamp,
-                        tag_address="", message=""):
-        tag_name = f"{channel}.{device}"
-        subject = f"[異常] {self.mail_subject} - [{self.server_name}] Tag {tag_name} 讀取異常"
-        color, bg = self._SEVERITY_COLORS["Warning"]
-        rows = [
-            ("Server", self.server_name),
-            ("時間", timestamp),
-            ("Channel.Device", tag_name),
-        ]
-        if tag_address:
-            rows.append(("Tag Address", f'<code>{tag_address}</code>'))
-        rows += [
-            ("連續失敗",
-             f'<span style="font-size:1.1em;font-weight:bold;color:{color};">'
-             f'{count} 次</span>'),
-            ("告警門檻", f'{self.tag_error_consecutive} 次'),
-        ]
-        html_body = self._build_email_html(
-            badge_color=color, badge_bg=bg,
-            badge_text="TAG ERROR", title=f"Tag {tag_name} 讀取異常",
-            rows=rows,
-            message=message,
-            footer="Tag 連續讀取失敗已達門檻，請確認點位設定或設備狀態。",
-        )
-        self._do_send_alert(subject, html_body, "kepware_tag", tag_name)
-
     def _send_transaction_alert(self, tx):
         subject = f"[操作] {self.mail_subject} - [{self.server_name}] DELETE 操作通知"
         html_body = self._build_email_html(
@@ -462,33 +471,3 @@ class KepwareLogService:
             )
         except Exception as ex:
             logging.warning(f"KepwareLogService[{self.server_name}] 派報紀錄寫入失敗: {ex}")
-
-        if self.webhook:
-            self._fire_webhook(subject, diagnostic_msg, alert_type)
-
-    def _fire_webhook(self, subject, diagnostic_msg, alert_type):
-        def _do_send():
-            try:
-                variables = self.webhook.build_variables(
-                    server_name=self.server_name,
-                    device_name=alert_type,
-                    value="",
-                    threshold="",
-                    condition="",
-                    counter=0,
-                    accumulate=0,
-                    diagnostic_msg=diagnostic_msg,
-                    is_recovery=False,
-                )
-                self.webhook.send(
-                    variables,
-                    db_service=self.db,
-                    server_name=self.server_name,
-                    device_name=alert_type,
-                    is_recovery=False,
-                )
-            except Exception as ex:
-                logging.warning(f"KepwareLogService[{self.server_name}] Webhook 推播失敗: {ex}")
-
-        t = threading.Thread(target=_do_send, daemon=True)
-        t.start()

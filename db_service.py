@@ -669,6 +669,89 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def get_daily_event_summary(self, date_str, server_name=None):
+        conn = self._get_conn()
+        try:
+            where = "WHERE substr(timestamp, 1, 10) = ?"
+            params = [date_str]
+            if server_name:
+                where += " AND server_name = ?"
+                params.append(server_name)
+
+            sev_sql = f"""
+                SELECT COALESCE(severity, 'Unclassified') as sev,
+                       COUNT(*) as cnt
+                FROM kepware_events {where}
+                AND event IN ('Warning', 'Error')
+                GROUP BY sev
+            """
+            sev_rows = conn.execute(sev_sql, params).fetchall()
+            severity_counts = {"Critical": 0, "Warning": 0,
+                               "Advisory": 0, "Unclassified": 0}
+            for r in sev_rows:
+                key = r["sev"] if r["sev"] in severity_counts else "Unclassified"
+                severity_counts[key] += r["cnt"]
+
+            ch_sql = f"""
+                SELECT channel,
+                       COALESCE(severity, 'Unclassified') as sev,
+                       COUNT(*) as cnt
+                FROM kepware_events {where}
+                AND channel != '' AND event IN ('Warning', 'Error')
+                GROUP BY channel, sev
+                ORDER BY cnt DESC
+            """
+            ch_rows = conn.execute(ch_sql, params).fetchall()
+            by_channel = {}
+            for r in ch_rows:
+                ch = r["channel"]
+                if ch not in by_channel:
+                    by_channel[ch] = {"channel": ch, "Critical": 0, "Warning": 0,
+                                      "Advisory": 0, "Unclassified": 0, "total": 0}
+                key = r["sev"] if r["sev"] in severity_counts else "Unclassified"
+                by_channel[ch][key] += r["cnt"]
+                by_channel[ch]["total"] += r["cnt"]
+            top_channels = sorted(by_channel.values(),
+                                  key=lambda x: x["total"], reverse=True)[:10]
+
+            tag_sql = f"""
+                SELECT channel, device, tag_address, COUNT(*) as cnt
+                FROM kepware_events {where}
+                AND tag_address != '' AND event IN ('Warning', 'Error')
+                GROUP BY channel, device, tag_address
+                ORDER BY cnt DESC
+                LIMIT 10
+            """
+            tag_rows = conn.execute(tag_sql, params).fetchall()
+            top_tags = [dict(r) for r in tag_rows]
+
+            avg_sql = """
+                SELECT COUNT(*) as cnt FROM kepware_events
+                WHERE event IN ('Warning', 'Error')
+                AND substr(timestamp, 1, 10) >= date(?, '-7 days')
+                AND substr(timestamp, 1, 10) < ?
+            """
+            avg_params = [date_str, date_str]
+            if server_name:
+                avg_sql += " AND server_name = ?"
+                avg_params.append(server_name)
+            avg_row = conn.execute(avg_sql, avg_params).fetchone()
+            past_7d_total = avg_row["cnt"] if avg_row else 0
+            avg_daily = past_7d_total / 7.0 if past_7d_total > 0 else 0
+
+            today_total = sum(severity_counts.values())
+
+            return {
+                "date": date_str,
+                "severity_counts": severity_counts,
+                "today_total": today_total,
+                "avg_daily_7d": avg_daily,
+                "top_channels": top_channels,
+                "top_tags": top_tags,
+            }
+        finally:
+            conn.close()
+
     # ===========================================
     # Tag 動態閥值
     # ===========================================
