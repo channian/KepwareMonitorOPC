@@ -61,6 +61,64 @@ def _admin_or_403(request: Request):
 
 
 # ===========================================
+# 健康檢查（公開，供外部監控工具使用）
+# ===========================================
+
+@app.get("/api/health")
+async def api_health():
+    import time
+    result = {"status": "ok", "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+    opc_status = []
+    if monitor_manager:
+        for name, conn in monitor_manager.connections.items():
+            opc_status.append({
+                "server": name,
+                "url": conn.url,
+                "connected": conn.connected,
+            })
+    result["opc_connections"] = opc_status
+
+    db_info = {}
+    if db_service:
+        try:
+            db_path = db_service.db_path
+            db_info["path"] = db_path
+            if os.path.exists(db_path):
+                size_bytes = os.path.getsize(db_path)
+                db_info["size_mb"] = round(size_bytes / (1024 * 1024), 2)
+            db_info["status"] = "ok"
+        except Exception as ex:
+            db_info["status"] = "error"
+            db_info["error"] = str(ex)
+    result["database"] = db_info
+
+    devices_info = {}
+    if monitor_manager:
+        total = len(monitor_manager.devices)
+        enabled = sum(1 for d in monitor_manager.devices if d.enable)
+        devices_info = {"total": total, "enabled": enabled}
+    result["devices"] = devices_info
+
+    kepware_logs = []
+    if monitor_manager and monitor_manager.kepware_logs:
+        for kl in monitor_manager.kepware_logs:
+            kepware_logs.append({
+                "server": kl.server_name,
+                "poll_interval": kl.poll_interval,
+                "daily_summary_sent": kl._daily_summary_sent,
+            })
+    result["kepware_logs"] = kepware_logs
+
+    all_connected = all(c["connected"] for c in opc_status) if opc_status else False
+    db_ok = db_info.get("status") == "ok"
+    if not all_connected or not db_ok:
+        result["status"] = "degraded"
+
+    return JSONResponse(result)
+
+
+# ===========================================
 # 登入 / 登出
 # ===========================================
 
