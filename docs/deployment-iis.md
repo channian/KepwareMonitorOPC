@@ -1,13 +1,13 @@
-# IIS + NSSM 部署指南
+# IIS + WinSW 部署指南
 
-本文件說明如何在 Windows Server 環境中，使用 IIS 反向代理 + NSSM 服務包裝，將 KepwareMonitorOPC 部署為正式服務。
+本文件說明如何在 Windows Server 環境中，使用 IIS 反向代理 + WinSW 服務包裝，將 KepwareMonitorOPC 部署為正式服務。
 
 ## 架構
 
 ```
 外部使用者 (瀏覽器)
     ↓ HTTP/HTTPS (Port 80/443)
-IIS (反向代理)
+IIS (反向代理)           ← 選用，不用 IIS 可直接用 :8080 存取
     ↓ localhost:8080
 uvicorn (FastAPI)
     ↓
@@ -24,8 +24,8 @@ kepware_monitor.py (主程式)
 |------|----------|
 | Windows Server | 2016 / 2019 / 2022 |
 | Python | 3.8+ (建議 3.10+) |
-| IIS | 需安裝 ARR + URL Rewrite 模組 |
-| NSSM | 最新版 (nssm.cc) |
+| .NET Framework | 4.6.1+ (WinSW 需要，Windows Server 內建) |
+| IIS | 選用，需安裝 ARR + URL Rewrite 模組 |
 | 網路 | 可連線 Kepware OPC UA Server |
 
 ## 步驟 1：Python 環境
@@ -54,12 +54,14 @@ copy Config\tags.example.csv Config\tags.csv
 
 編輯 `Config\settings.ini`，設定 OPC Server 連線、Email、WebUI 等資訊。
 
-確認 WebUI 設定：
+WebUI 設定建議：
 
 ```ini
 [WebUI]
 Enable = true
-Host = 127.0.0.1    # 只綁定 localhost，由 IIS 對外
+# 若使用 IIS 反向代理，綁定 localhost 即可
+# 若不使用 IIS，改為 0.0.0.0 讓外部可直接存取
+Host = 127.0.0.1
 Port = 8080
 ```
 
@@ -78,68 +80,105 @@ Port = 8080
 
 確認無誤後 `Ctrl+C` 停止程式。
 
-## 步驟 3：NSSM 服務包裝
+## 步驟 3：WinSW 服務包裝
 
-### 安裝 NSSM
+### 下載 WinSW
 
-1. 從 [nssm.cc](https://nssm.cc/download) 下載最新版
-2. 解壓縮到 `C:\Tools\nssm\`（或加入系統 PATH）
-
-### 建立 Windows 服務
+1. 前往 [WinSW Releases](https://github.com/winsw/winsw/releases)
+2. 下載 `WinSW-x64.exe`
+3. 重新命名為 `KepwareMonitor.exe`，放到專案目錄
 
 ```powershell
+# 下載並重命名
+curl -L -o C:\Services\KepwareMonitor\KepwareMonitor.exe https://github.com/winsw/winsw/releases/download/v3.0.0-alpha.11/WinSW-x64.exe
+```
+
+### 建立服務設定檔
+
+在同一目錄建立 `KepwareMonitor.xml`（檔名必須與 exe 一致）：
+
+```xml
+<service>
+  <id>KepwareMonitor</id>
+  <name>Kepware Monitor OPC</name>
+  <description>Kepware OPC UA 監控服務 — 設備數值監控、事件 Log 監控、Web UI</description>
+
+  <!-- Python 執行檔與啟動參數 -->
+  <executable>%BASE%\venv\Scripts\python.exe</executable>
+  <arguments>kepware_monitor.py</arguments>
+  <workingdirectory>%BASE%</workingdirectory>
+
+  <!-- 服務啟動方式 -->
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+
+  <!-- 異常退出時自動重啟 -->
+  <onfailure action="restart" delay="10 sec" />
+  <onfailure action="restart" delay="30 sec" />
+  <onfailure action="restart" delay="60 sec" />
+  <resetfailure>1 hour</resetfailure>
+
+  <!-- 日誌設定（自動 rotate） -->
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+    <logpath>%BASE%\logs</logpath>
+  </log>
+
+  <!-- 環境變數（選用） -->
+  <env name="PYTHONUNBUFFERED" value="1" />
+</service>
+```
+
+### 安裝與管理
+
+```powershell
+cd C:\Services\KepwareMonitor
+
 # 安裝服務
-C:\Tools\nssm\nssm.exe install KepwareMonitor
+.\KepwareMonitor.exe install
 
-# NSSM GUI 設定畫面會彈出，填入以下資訊：
-```
-
-| Tab | 欄位 | 值 |
-|-----|------|------|
-| Application | Path | `C:\Services\KepwareMonitor\venv\Scripts\python.exe` |
-| Application | Startup directory | `C:\Services\KepwareMonitor` |
-| Application | Arguments | `kepware_monitor.py` |
-| Details | Display name | `Kepware Monitor OPC` |
-| Details | Description | `Kepware OPC UA 監控服務` |
-| Details | Startup type | `Automatic` |
-| I/O | Output (stdout) | `C:\Services\KepwareMonitor\logs\service-stdout.log` |
-| I/O | Error (stderr) | `C:\Services\KepwareMonitor\logs\service-stderr.log` |
-| Exit actions | Restart Action | `Restart application` |
-| Exit actions | Delay (ms) | `10000` (10 秒後重啟) |
-
-或使用命令列模式：
-
-```powershell
-nssm install KepwareMonitor "C:\Services\KepwareMonitor\venv\Scripts\python.exe" "kepware_monitor.py"
-nssm set KepwareMonitor AppDirectory "C:\Services\KepwareMonitor"
-nssm set KepwareMonitor DisplayName "Kepware Monitor OPC"
-nssm set KepwareMonitor Description "Kepware OPC UA 監控服務"
-nssm set KepwareMonitor Start SERVICE_AUTO_START
-nssm set KepwareMonitor AppStdout "C:\Services\KepwareMonitor\logs\service-stdout.log"
-nssm set KepwareMonitor AppStderr "C:\Services\KepwareMonitor\logs\service-stderr.log"
-nssm set KepwareMonitor AppRestartDelay 10000
-```
-
-### 服務管理
-
-```powershell
 # 啟動
-nssm start KepwareMonitor
-
-# 停止
-nssm stop KepwareMonitor
-
-# 重啟
-nssm restart KepwareMonitor
+.\KepwareMonitor.exe start
 
 # 查看狀態
-nssm status KepwareMonitor
+.\KepwareMonitor.exe status
+
+# 停止
+.\KepwareMonitor.exe stop
+
+# 重啟
+.\KepwareMonitor.exe restart
 
 # 移除服務（需先停止）
-nssm remove KepwareMonitor confirm
+.\KepwareMonitor.exe uninstall
 ```
 
-## 步驟 4：IIS 反向代理
+也可以用 Windows 標準指令管理：
+
+```powershell
+# 用 sc 查看
+sc query KepwareMonitor
+
+# 用 PowerShell
+Get-Service KepwareMonitor
+
+# 在 services.msc (服務管理員) 中也能看到
+```
+
+### WinSW XML 設定說明
+
+| 標籤 | 說明 |
+|------|------|
+| `%BASE%` | 自動替換為 exe 所在目錄 |
+| `delayedAutoStart` | 延遲啟動，等其他服務就緒後再啟動 |
+| `onfailure` | 可設定多層重啟策略（10s → 30s → 60s） |
+| `log mode="roll-by-size"` | 日誌自動 rotate，每 10MB 滾動，保留 5 個檔案 |
+| `PYTHONUNBUFFERED` | 確保 Python 輸出即時寫入日誌 |
+
+## 步驟 4：IIS 反向代理（選用）
+
+> 如果不需要自訂域名或 HTTPS，可以跳過此步驟，直接用 `http://伺服器IP:8080` 存取。
 
 ### 安裝必要模組
 
@@ -175,12 +214,6 @@ nssm remove KepwareMonitor confirm
 
 ### 設定 URL Rewrite 規則
 
-1. 選取剛建立的站台
-2. 雙擊 **URL Rewrite**
-3. 右側 **新增規則** → **反向 Proxy**
-4. 填入：`localhost:8080`
-5. 或手動建立規則：
-
 在站台根目錄建立 `web.config`：
 
 ```xml
@@ -215,17 +248,25 @@ nssm remove KepwareMonitor confirm
 # 檢查 Windows 服務
 Get-Service KepwareMonitor
 
+# 檢查 WinSW 狀態
+cd C:\Services\KepwareMonitor
+.\KepwareMonitor.exe status
+
 # 檢查 Port 監聽
 netstat -an | findstr "8080"
+
+# 查看服務日誌
+type logs\KepwareMonitor.out.log
+type logs\KepwareMonitor.err.log
 ```
 
-### 確認 IIS 反向代理
+### 健康檢查
 
 ```powershell
 # 直連 Python 服務
 curl http://localhost:8080/api/health
 
-# 透過 IIS
+# 透過 IIS（若有設定）
 curl http://kepware-monitor.company.com/api/health
 ```
 
@@ -261,8 +302,9 @@ curl http://kepware-monitor.company.com/api/health
 ### 服務啟動失敗
 
 ```powershell
-# 查看 NSSM 日誌
-type C:\Services\KepwareMonitor\logs\service-stderr.log
+# 查看 WinSW 日誌
+type C:\Services\KepwareMonitor\logs\KepwareMonitor.err.log
+type C:\Services\KepwareMonitor\logs\KepwareMonitor.wrapper.log
 
 # 手動測試
 cd C:\Services\KepwareMonitor
@@ -284,23 +326,27 @@ cd C:\Services\KepwareMonitor
 ### 程式更新
 
 ```powershell
-# 1. 停止服務
-nssm stop KepwareMonitor
+cd C:\Services\KepwareMonitor
 
-# 2. 更新檔案
-xcopy /E /Y \\source\KepwareMonitorOPC C:\Services\KepwareMonitor
+# 1. 停止服務
+.\KepwareMonitor.exe stop
+
+# 2. 更新檔案（保留 Config、data、logs）
+xcopy /E /Y \\source\KepwareMonitorOPC . /EXCLUDE:exclude.txt
 
 # 3. 更新套件（如有新增）
 .\venv\Scripts\pip.exe install -r requirements.txt
 
 # 4. 重啟服務
-nssm start KepwareMonitor
+.\KepwareMonitor.exe start
 ```
 
 ## 目錄結構（部署後）
 
 ```
 C:\Services\KepwareMonitor\
+├── KepwareMonitor.exe       # WinSW 執行檔
+├── KepwareMonitor.xml       # WinSW 服務設定
 ├── venv\                    # Python 虛擬環境
 ├── Config\
 │   ├── settings.ini         # 設定檔
@@ -308,9 +354,10 @@ C:\Services\KepwareMonitor\
 ├── data\
 │   └── monitor.db           # SQLite 資料庫
 ├── logs\
-│   ├── service-stdout.log   # NSSM stdout
-│   ├── service-stderr.log   # NSSM stderr
-│   └── *.log                # 應用程式日誌
+│   ├── KepwareMonitor.out.log    # stdout（自動 rotate）
+│   ├── KepwareMonitor.err.log    # stderr（自動 rotate）
+│   ├── KepwareMonitor.wrapper.log # WinSW 本身日誌
+│   └── *.log                     # 應用程式日誌
 ├── web\                     # Web UI
 ├── kepware_monitor.py       # 主程式
 ├── requirements.txt
