@@ -639,9 +639,10 @@ class DatabaseService:
                 d = r["date"]
                 if d not in daily:
                     daily[d] = {"date": d, "Critical": 0, "Warning": 0,
-                                "Advisory": 0, "Unclassified": 0}
+                                "Advisory": 0, "Unclassified": 0, "total": 0}
                 sev = r["sev"] if r["sev"] in ("Critical", "Warning", "Advisory") else "Unclassified"
                 daily[d][sev] += r["cnt"]
+                daily[d]["total"] += r["cnt"]
 
             channel_sql = f"""
                 SELECT channel,
@@ -658,13 +659,20 @@ class DatabaseService:
                 ch = r["channel"]
                 if ch not in by_channel:
                     by_channel[ch] = {"channel": ch, "Critical": 0, "Warning": 0,
-                                      "Advisory": 0, "Unclassified": 0}
+                                      "Advisory": 0, "Unclassified": 0, "total": 0}
                 sev = r["sev"] if r["sev"] in ("Critical", "Warning", "Advisory") else "Unclassified"
                 by_channel[ch][sev] += r["cnt"]
+                by_channel[ch]["total"] += r["cnt"]
+
+            sorted_channels = sorted(by_channel.values(),
+                                     key=lambda x: x["total"], reverse=True)
+
+            total_events = sum(d["total"] for d in daily.values())
 
             return {
                 "daily": list(daily.values()),
-                "by_channel": list(by_channel.values()),
+                "by_channel": sorted_channels,
+                "total_events": total_events,
             }
         finally:
             conn.close()
