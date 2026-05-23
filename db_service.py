@@ -669,9 +669,30 @@ class DatabaseService:
 
             total_events = sum(d["total"] for d in daily.values())
 
+            type_sql = f"""
+                SELECT substr(timestamp, 1, 10) as date,
+                       COALESCE(event, 'Unknown') as etype,
+                       COUNT(*) as cnt
+                FROM kepware_events {where}
+                GROUP BY date, etype
+                ORDER BY date
+            """
+            type_rows = conn.execute(type_sql, params).fetchall()
+
+            daily_by_type = {}
+            for r in type_rows:
+                d = r["date"]
+                if d not in daily_by_type:
+                    daily_by_type[d] = {"date": d, "Error": 0, "Warning": 0,
+                                        "Info": 0, "total": 0}
+                et = r["etype"] if r["etype"] in ("Error", "Warning", "Info") else "Info"
+                daily_by_type[d][et] += r["cnt"]
+                daily_by_type[d]["total"] += r["cnt"]
+
             return {
                 "daily": list(daily.values()),
                 "by_channel": sorted_channels,
+                "daily_by_type": list(daily_by_type.values()),
                 "total_events": total_events,
             }
         finally:

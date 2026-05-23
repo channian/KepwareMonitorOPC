@@ -271,15 +271,32 @@ class KepwareLogService:
 
     def _send_daily_summary(self, date_str):
         summary = self.db.get_daily_event_summary(date_str, self.server_name)
+        today = summary["today_total"]
 
-        if summary["today_total"] == 0:
+        subject = f"[日報] {self.mail_subject} - [{self.server_name}] {date_str}"
+
+        if today == 0:
+            html_body = f"""<html><body style="font-family:Arial,sans-serif;color:#333;margin:0;padding:0;">
+<div style="max-width:700px;margin:20px auto;">
+  <div style="padding:12px 20px;background:#f0fdf4;border-left:5px solid #22c55e;margin-bottom:16px;">
+    <span style="font-size:16px;font-weight:bold;color:#16a34a;">
+      Kepware 事件日報 — {self.server_name}</span>
+    <span style="float:right;color:#666;">{date_str}</span>
+  </div>
+  <p style="font-size:15px;padding:8px 12px;">今日無異常事件，系統運作正常。</p>
+  <hr style="border:none;border-top:1px solid #e0e0e0;margin:20px 0;">
+  <p style="font-size:12px;color:#999;">
+    此為每日自動彙整報告，詳細紀錄請至 Web UI 查詢。</p>
+</div>
+</body></html>"""
+            self._do_send_alert(subject, html_body, "kepware_daily_summary",
+                                f"{date_str} total=0 (無異常)")
             logging.info(f"KepwareLogService[{self.server_name}] "
-                         f"每日彙整: {date_str} 無異常事件，不發送")
+                         f"每日彙整已發送: {date_str}, 今日無異常")
             return
 
         sc = summary["severity_counts"]
         avg = summary["avg_daily_7d"]
-        today = summary["today_total"]
 
         if avg > 0:
             pct = ((today - avg) / avg) * 100
@@ -347,8 +364,6 @@ class KepwareLogService:
                     f'<td style="padding:4px 10px;text-align:right;">{t["cnt"]}</td></tr>'
                 )
             tag_html += "</table>"
-
-        subject = f"[日報] {self.mail_subject} - [{self.server_name}] {date_str}"
 
         html_body = f"""<html><body style="font-family:Arial,sans-serif;color:#333;margin:0;padding:0;">
 <div style="max-width:700px;margin:20px auto;">
