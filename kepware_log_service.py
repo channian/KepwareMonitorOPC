@@ -1,8 +1,10 @@
+import os
 import re
 import hashlib
 import logging
 import threading
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import requests
 
@@ -62,10 +64,26 @@ class KepwareLogService:
         self._headers = {}
         self._last_event_ts = None
         self._last_tx_ts = None
-        self._daily_summary_sent = None
+
+        self._summary_marker_dir = Path("data")
+        self._summary_marker_dir.mkdir(parents=True, exist_ok=True)
+        self._summary_marker_path = (
+            self._summary_marker_dir / f".daily_summary_sent_{self.server_name}"
+        )
+        self._daily_summary_sent = self._load_summary_marker()
 
         logging.info(f"KepwareLogService[{self.server_name}] 初始化: "
                      f"base_url={self.base_url}, poll={self.poll_interval}s")
+
+    def _load_summary_marker(self):
+        try:
+            return self._summary_marker_path.read_text().strip()
+        except FileNotFoundError:
+            return None
+
+    def _save_summary_marker(self, date_str):
+        self._summary_marker_path.write_text(date_str)
+        self._daily_summary_sent = date_str
 
     # ===========================================
     # JWT 認證
@@ -234,21 +252,22 @@ class KepwareLogService:
         return False, None
 
     # ===========================================
-    # 每日彙整報告（23:50）
+    # 每日彙整報告（22:00 後首次 poll 觸發）
     # ===========================================
 
     def _check_daily_summary(self):
         now = datetime.now()
-        if now.hour == 23 and now.minute >= 50:
-            today_str = now.strftime("%Y-%m-%d")
-            if self._daily_summary_sent == today_str:
-                return
-            self._daily_summary_sent = today_str
-            try:
-                self._send_daily_summary(today_str)
-            except Exception as ex:
-                logging.error(f"KepwareLogService[{self.server_name}] "
-                              f"每日彙整失敗: {ex}")
+        if now.hour < 22:
+            return
+        today_str = now.strftime("%Y-%m-%d")
+        if self._daily_summary_sent == today_str:
+            return
+        try:
+            self._send_daily_summary(today_str)
+            self._save_summary_marker(today_str)
+        except Exception as ex:
+            logging.error(f"KepwareLogService[{self.server_name}] "
+                          f"每日彙整失敗: {ex}")
 
     def _send_daily_summary(self, date_str):
         summary = self.db.get_daily_event_summary(date_str, self.server_name)
