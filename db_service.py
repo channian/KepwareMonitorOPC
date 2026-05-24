@@ -476,10 +476,10 @@ class DatabaseService:
                 sql += " AND server_name = ?"
                 params.append(server_name)
             if start_date:
-                sql += " AND timestamp >= ?"
+                sql += " AND created_at >= ?"
                 params.append(start_date)
             if end_date:
-                sql += " AND timestamp <= ?"
+                sql += " AND created_at <= ?"
                 params.append(end_date + " 23:59:59")
             if channel:
                 sql += " AND channel = ?"
@@ -490,7 +490,7 @@ class DatabaseService:
             if severity:
                 sql += " AND severity = ?"
                 params.append(severity)
-            sql += " ORDER BY timestamp DESC LIMIT ?"
+            sql += " ORDER BY created_at DESC LIMIT ?"
             params.append(limit)
             rows = conn.execute(sql, params).fetchall()
             return [dict(r) for r in rows]
@@ -502,7 +502,7 @@ class DatabaseService:
         try:
             row = conn.execute(
                 """SELECT COUNT(*) as cnt FROM kepware_events
-                   WHERE channel = ? AND timestamp >= ?
+                   WHERE channel = ? AND created_at >= ?
                    AND event IN ('Warning', 'Error')""",
                 (channel, window_start),
             ).fetchone()
@@ -516,7 +516,7 @@ class DatabaseService:
             rows = conn.execute(
                 """SELECT event FROM kepware_events
                    WHERE channel = ? AND device = ?
-                   ORDER BY timestamp DESC LIMIT 100""",
+                   ORDER BY created_at DESC LIMIT 100""",
                 (channel, device),
             ).fetchall()
             count = 0
@@ -573,15 +573,15 @@ class DatabaseService:
                 sql += " AND server_name = ?"
                 params.append(server_name)
             if start_date:
-                sql += " AND timestamp >= ?"
+                sql += " AND created_at >= ?"
                 params.append(start_date)
             if end_date:
-                sql += " AND timestamp <= ?"
+                sql += " AND created_at <= ?"
                 params.append(end_date + " 23:59:59")
             if action:
                 sql += " AND action = ?"
                 params.append(action)
-            sql += " ORDER BY timestamp DESC LIMIT ?"
+            sql += " ORDER BY created_at DESC LIMIT ?"
             params.append(limit)
             rows = conn.execute(sql, params).fetchall()
             return [dict(r) for r in rows]
@@ -618,14 +618,14 @@ class DatabaseService:
                 where += " AND server_name = ?"
                 params.append(server_name)
             if start_date:
-                where += " AND timestamp >= ?"
+                where += " AND created_at >= ?"
                 params.append(start_date)
             if end_date:
-                where += " AND timestamp <= ?"
+                where += " AND created_at <= ?"
                 params.append(end_date + " 23:59:59")
 
             daily_sql = f"""
-                SELECT substr(timestamp, 1, 10) as date,
+                SELECT substr(created_at, 1, 10) as date,
                        COALESCE(severity, 'Unclassified') as sev,
                        COUNT(*) as cnt
                 FROM kepware_events {where}
@@ -670,7 +670,7 @@ class DatabaseService:
             total_events = sum(d["total"] for d in daily.values())
 
             type_sql = f"""
-                SELECT substr(timestamp, 1, 10) as date,
+                SELECT substr(created_at, 1, 10) as date,
                        COALESCE(event, 'Unknown') as etype,
                        COUNT(*) as cnt
                 FROM kepware_events {where}
@@ -701,7 +701,7 @@ class DatabaseService:
     def get_daily_event_summary(self, date_str, server_name=None):
         conn = self._get_conn()
         try:
-            where = "WHERE substr(timestamp, 1, 10) = ?"
+            where = "WHERE substr(created_at, 1, 10) = ?"
             params = [date_str]
             if server_name:
                 where += " AND server_name = ?"
@@ -757,8 +757,8 @@ class DatabaseService:
             avg_sql = """
                 SELECT COUNT(*) as cnt FROM kepware_events
                 WHERE event IN ('Warning', 'Error')
-                AND substr(timestamp, 1, 10) >= date(?, '-7 days')
-                AND substr(timestamp, 1, 10) < ?
+                AND substr(created_at, 1, 10) >= date(?, '-7 days')
+                AND substr(created_at, 1, 10) < ?
             """
             avg_params = [date_str, date_str]
             if server_name:

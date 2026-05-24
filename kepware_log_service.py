@@ -137,12 +137,13 @@ class KepwareLogService:
 
         new_count = 0
         for ev in events:
-            ts = ev.get("timestamp", "")
+            raw_ts = ev.get("timestamp", "")
             source = ev.get("source", "")
             message = ev.get("message", "")
             event_type = ev.get("event", "")
 
-            dedup_hash = self._make_hash(ts, source, message)
+            dedup_hash = self._make_hash(raw_ts, source, message)
+            ts = self._normalize_timestamp(raw_ts)
             if self.db.kepware_event_exists(dedup_hash):
                 continue
 
@@ -172,7 +173,7 @@ class KepwareLogService:
 
         new_count = 0
         for tx in transactions:
-            ts = tx.get("timestamp", "")
+            ts = self._normalize_timestamp(tx.get("timestamp", ""))
             user = tx.get("user", "")
             action = tx.get("action", "")
             endpoint = tx.get("endpoint", "")
@@ -206,6 +207,32 @@ class KepwareLogService:
     def _make_hash(timestamp, source, message):
         raw = f"{timestamp}|{source}|{message}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+    _TS_FORMATS = [
+        "%Y-%m-%dT%H:%M:%S.%fZ",
+        "%Y-%m-%dT%H:%M:%SZ",
+        "%Y-%m-%dT%H:%M:%S.%f",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%m/%d/%Y %I:%M:%S %p",
+        "%m/%d/%Y %H:%M:%S",
+        "%d/%m/%Y %H:%M:%S",
+        "%Y/%m/%d %H:%M:%S",
+    ]
+
+    @classmethod
+    def _normalize_timestamp(cls, ts):
+        if not ts:
+            return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for fmt in cls._TS_FORMATS:
+            try:
+                dt = datetime.strptime(ts.strip(), fmt)
+                return dt.strftime("%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                continue
+        if len(ts) >= 19 and ts[4] == '-' and ts[7] == '-':
+            return ts[:19]
+        return ts
 
     def _parse_channel_device(self, message):
         m = self.CHANNEL_DEVICE_RE.match(message)

@@ -400,8 +400,15 @@ function loadCharts() {
     if (ed) params.set('end_date', ed);
 
     fetch('/api/kepware/stats?' + params)
-        .then(function(r) { return r.json(); })
+        .then(function(r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        })
         .then(function(data) {
+            if (data.error) {
+                console.error('Stats API error:', data.error);
+                return;
+            }
             var daily = data.daily || [];
             var channels = data.by_channel || [];
             var dailyByType = data.daily_by_type || [];
@@ -409,7 +416,7 @@ function loadCharts() {
 
             var summaryEl = document.getElementById('chartSummary');
             document.getElementById('chartTotal').textContent = total;
-            summaryEl.style.display = total > 0 ? '' : 'none';
+            summaryEl.style.display = '';
 
             document.getElementById('dailyNoData').style.display = daily.length === 0 ? '' : 'none';
             document.getElementById('typeNoData').style.display = dailyByType.length === 0 ? '' : 'none';
@@ -419,7 +426,11 @@ function loadCharts() {
             renderTypeChart(dailyByType);
             renderChannelChart(channels);
         })
-        .catch(function(err) { console.error('Chart load error:', err); });
+        .catch(function(err) {
+            console.error('Chart load error:', err);
+            document.getElementById('chartSummary').style.display = '';
+            document.getElementById('chartTotal').textContent = '載入失敗';
+        });
 }
 
 function renderDailyChart(daily) {
