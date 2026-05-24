@@ -665,7 +665,7 @@ class DatabaseService:
                 by_channel[ch]["total"] += r["cnt"]
 
             sorted_channels = sorted(by_channel.values(),
-                                     key=lambda x: x["total"], reverse=True)
+                                     key=lambda x: x["total"], reverse=True)[:10]
 
             total_events = sum(d["total"] for d in daily.values())
 

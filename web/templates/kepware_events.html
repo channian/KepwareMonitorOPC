@@ -152,6 +152,14 @@
     <div class="card-ui mb-4">
         <form style="margin-bottom:0;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;" onsubmit="loadCharts(); return false;">
             <div>
+                <label class="form-label">快速選擇</label>
+                <div style="display:flex;gap:4px;">
+                    <button type="button" class="btn btn-sm" onclick="setChartRange(7)">7天</button>
+                    <button type="button" class="btn btn-sm" onclick="setChartRange(14)">14天</button>
+                    <button type="button" class="btn btn-sm" onclick="setChartRange(30)">30天</button>
+                </div>
+            </div>
+            <div>
                 <label class="form-label">開始日期</label>
                 <input type="date" class="input w-full" id="chartStartDate">
             </div>
@@ -197,11 +205,19 @@
 {% block scripts %}
 <script>
 var today = new Date().toISOString().split('T')[0];
-var monthAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
+var weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
 document.getElementById('evEndDate').value = today;
 document.getElementById('txEndDate').value = today;
 document.getElementById('chartEndDate').value = today;
-document.getElementById('chartStartDate').value = monthAgo;
+document.getElementById('chartStartDate').value = weekAgo;
+
+function setChartRange(days) {
+    var end = new Date().toISOString().split('T')[0];
+    var start = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
+    document.getElementById('chartStartDate').value = start;
+    document.getElementById('chartEndDate').value = end;
+    loadCharts();
+}
 
 var dailyChartInst = null;
 var channelChartInst = null;
@@ -433,8 +449,10 @@ function loadCharts() {
         });
 }
 
+function shortDate(d) { return d ? d.substring(5) : d; }
+
 function renderDailyChart(daily) {
-    var labels = daily.map(function(d) { return d.date; });
+    var labels = daily.map(function(d) { return shortDate(d.date); });
     var datasets = ['Critical', 'Warning', 'Advisory', 'Unclassified'].map(function(sev) {
         return {
             label: sev,
@@ -453,7 +471,7 @@ function renderDailyChart(daily) {
             maintainAspectRatio: false,
             plugins: { legend: { position: 'bottom', labels: { color: '#94a3b8', font: { size: 11 } } } },
             scales: {
-                x: { stacked: true, ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { color: 'rgba(148,163,184,0.1)' } },
+                x: { stacked: true, ticks: { color: '#94a3b8', font: { size: 10 }, maxRotation: 45 }, grid: { color: 'rgba(148,163,184,0.1)' } },
                 y: { stacked: true, beginAtZero: true, ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { color: 'rgba(148,163,184,0.1)' } }
             }
         }
@@ -462,7 +480,7 @@ function renderDailyChart(daily) {
 
 function renderTypeChart(dailyByType) {
     var typeColors = { Error: '#ef4444', Warning: '#f59e0b', Info: '#22c55e' };
-    var labels = dailyByType.map(function(d) { return d.date; });
+    var labels = dailyByType.map(function(d) { return shortDate(d.date); });
     var datasets = ['Error', 'Warning', 'Info'].map(function(et) {
         return {
             label: et,
@@ -481,7 +499,7 @@ function renderTypeChart(dailyByType) {
             maintainAspectRatio: false,
             plugins: { legend: { position: 'bottom', labels: { color: '#94a3b8', font: { size: 11 } } } },
             scales: {
-                x: { stacked: true, ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { color: 'rgba(148,163,184,0.1)' } },
+                x: { stacked: true, ticks: { color: '#94a3b8', font: { size: 10 }, maxRotation: 45 }, grid: { color: 'rgba(148,163,184,0.1)' } },
                 y: { stacked: true, beginAtZero: true, ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { color: 'rgba(148,163,184,0.1)' } }
             }
         }
