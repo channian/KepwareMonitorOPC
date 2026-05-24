@@ -778,36 +778,3 @@ async def api_kepware_stats(request: Request):
         server_name=server_name,
     )
     return JSONResponse(stats)
-
-
-@app.get("/api/kepware/debug-schema")
-async def api_kepware_debug_schema(request: Request):
-    """臨時偵錯端點：檢查 DB 實際表結構與資料筆數"""
-    user, err = _admin_or_403(request)
-    if err:
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
-
-    conn = db_service._get_conn()
-    try:
-        tables = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' "
-            "ORDER BY name"
-        ).fetchall()
-        result = {}
-        for t in tables:
-            tname = t["name"]
-            cols = conn.execute(f"PRAGMA table_info({tname})").fetchall()
-            col_names = [c[1] for c in cols]
-            count = conn.execute(f"SELECT COUNT(*) as cnt FROM {tname}").fetchone()["cnt"]
-            sample = None
-            if count > 0:
-                row = conn.execute(f"SELECT * FROM {tname} LIMIT 1").fetchone()
-                sample = dict(row) if row else None
-            result[tname] = {
-                "columns": col_names,
-                "row_count": count,
-                "sample": sample,
-            }
-        return JSONResponse(result)
-    finally:
-        conn.close()

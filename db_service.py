@@ -157,7 +157,7 @@ class DatabaseService:
 
     @staticmethod
     def _migrate_kepware_columns(conn):
-        """為既有 DB 補上新欄位 + 正規化時間戳"""
+        """為既有 DB 補上新欄位"""
         cursor = conn.execute("PRAGMA table_info(kepware_events)")
         ev_cols = {row[1] for row in cursor.fetchall()}
         for col in ("server_name", "tag_address", "severity"):
@@ -170,49 +170,6 @@ class DatabaseService:
             conn.execute("ALTER TABLE kepware_transactions ADD COLUMN server_name TEXT")
 
         conn.commit()
-
-        DatabaseService._normalize_existing_timestamps(conn)
-
-    @staticmethod
-    def _normalize_existing_timestamps(conn):
-        """將既有非 ISO 格式的 timestamp 正規化為 YYYY-MM-DD HH:MM:SS"""
-        from datetime import datetime as _dt
-
-        _TS_FMTS = [
-            "%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ",
-            "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S",
-            "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S",
-            "%d/%m/%Y %H:%M:%S", "%Y/%m/%d %H:%M:%S",
-        ]
-
-        for table in ("kepware_events", "kepware_transactions"):
-            rows = conn.execute(
-                f"SELECT id, timestamp FROM {table} "
-                "WHERE timestamp NOT LIKE '____-__-__ __:__:__'"
-            ).fetchall()
-            if not rows:
-                continue
-            updated = 0
-            for row in rows:
-                ts = row[1]
-                if not ts:
-                    continue
-                new_ts = None
-                for fmt in _TS_FMTS:
-                    try:
-                        new_ts = _dt.strptime(ts.strip(), fmt).strftime(
-                            "%Y-%m-%d %H:%M:%S")
-                        break
-                    except ValueError:
-                        continue
-                if new_ts and new_ts != ts:
-                    conn.execute(
-                        f"UPDATE {table} SET timestamp = ? WHERE id = ?",
-                        (new_ts, row[0]))
-                    updated += 1
-            if updated:
-                logging.info(f"已正規化 {table} 中 {updated} 筆時間戳")
-            conn.commit()
 
     def _ensure_default_admin(self, conn):
         """確保預設 admin 帳號存在"""
