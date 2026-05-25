@@ -428,6 +428,75 @@ class KepwareLogService:
                      f"每日彙整已發送: {date_str}, 事件={today}")
 
     # ===========================================
+    # 專案備份
+    # ===========================================
+
+    def trigger_backup(self, trigger_by="schedule"):
+        """呼叫 Kepware API Gateway 執行專案備份（API schema 待補）"""
+        import time as _time
+        start = _time.time()
+        try:
+            # TODO: 等 API schema 確認後實作實際呼叫
+            # resp = self._api_get("/api/backup/trigger") 或 POST
+            # file_name = resp.get("file_name")
+            # file_size = resp.get("file_size")
+
+            raise NotImplementedError(
+                "備份 API 尚未實作，請提供 Kepware API Gateway 的備份 schema"
+            )
+
+        except NotImplementedError:
+            self.db.write_backup_record(
+                server_name=self.server_name,
+                status="pending",
+                error_msg="API schema 待設定",
+                trigger_by=trigger_by,
+                duration_ms=int((_time.time() - start) * 1000),
+            )
+            logging.warning(f"KepwareLogService[{self.server_name}] "
+                            f"備份 API 尚未實作")
+            return {"status": "pending", "error": "API schema 待設定"}
+
+        except Exception as ex:
+            elapsed = int((_time.time() - start) * 1000)
+            self.db.write_backup_record(
+                server_name=self.server_name,
+                status="failed",
+                error_msg=str(ex),
+                trigger_by=trigger_by,
+                duration_ms=elapsed,
+            )
+            logging.error(f"KepwareLogService[{self.server_name}] "
+                          f"備份失敗: {ex}")
+            return {"status": "failed", "error": str(ex)}
+
+    def check_weekly_backup(self, schedule):
+        """由 monitor_manager 的 poll loop 呼叫，檢查是否到達排程時間"""
+        now = datetime.now()
+        if now.weekday() != schedule.get("day_of_week", 6):
+            return
+
+        sched_time = schedule.get("time", "02:00")
+        parts = sched_time.split(":")
+        sched_hour, sched_min = int(parts[0]), int(parts[1])
+
+        if now.hour < sched_hour or (now.hour == sched_hour and now.minute < sched_min):
+            return
+
+        marker_path = self._summary_marker_dir / f".backup_done_{self.server_name}"
+        today_str = now.strftime("%Y-%m-%d")
+        try:
+            last = marker_path.read_text().strip()
+            if last == today_str:
+                return
+        except FileNotFoundError:
+            pass
+
+        logging.info(f"KepwareLogService[{self.server_name}] 排程備份觸發")
+        self.trigger_backup(trigger_by="schedule")
+        marker_path.write_text(today_str)
+
+    # ===========================================
     # 派報
     # ===========================================
 

@@ -761,3 +761,112 @@ async def api_kepware_health(request: Request):
                             "error": str(ex)})
 
     return JSONResponse({"enabled": True, "servers": results})
+
+
+# ===========================================
+# Kepware 專案備份
+# ===========================================
+
+@app.get("/kepware-backups", response_class=HTMLResponse)
+async def kepware_backups_page(request: Request):
+    user, err = _admin_or_403(request)
+    if err:
+        return err
+    return templates.TemplateResponse("kepware_backups.html", {
+        "request": request, "user": user,
+    })
+
+
+@app.get("/api/kepware/backups")
+async def api_kepware_backups(request: Request):
+    user, err = _admin_or_403(request)
+    if err:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    server_name = request.query_params.get("server_name")
+    rows = db_service.query_backups(server_name=server_name)
+    return JSONResponse({"data": rows})
+
+
+@app.get("/api/kepware/backup/schedule")
+async def api_backup_schedule_get(request: Request):
+    user, err = _admin_or_403(request)
+    if err:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    schedule = _load_backup_schedule()
+    return JSONResponse(schedule)
+
+
+@app.post("/api/kepware/backup/schedule")
+async def api_backup_schedule_post(request: Request):
+    user, err = _admin_or_403(request)
+    if err:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    try:
+        body = await request.json()
+        day = int(body.get("day_of_week", 6))
+        time_str = body.get("time", "02:00")
+        if day < 0 or day > 6:
+            return JSONResponse({"ok": False, "error": "day_of_week 須為 0-6"})
+        parts = time_str.split(":")
+        if len(parts) != 2 or not (0 <= int(parts[0]) <= 23) or not (0 <= int(parts[1]) <= 59):
+            return JSONResponse({"ok": False, "error": "time 格式錯誤"})
+
+        _save_backup_schedule(day, time_str)
+        if monitor_manager:
+            monitor_manager.backup_schedule = {"day_of_week": day, "time": time_str}
+        return JSONResponse({"ok": True})
+    except Exception as ex:
+        return JSONResponse({"ok": False, "error": str(ex)})
+
+
+@app.post("/api/kepware/backup/trigger")
+async def api_backup_trigger(request: Request):
+    user, err = _admin_or_403(request)
+    if err:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    body = await request.json()
+    server_name = body.get("server_name")
+    if not server_name:
+        return JSONResponse({"ok": False, "error": "缺少 server_name"})
+
+    if not monitor_manager or not monitor_manager.kepware_logs:
+        return JSONResponse({"ok": False, "error": "Kepware Log 未啟用"})
+
+    kl = None
+    for k in monitor_manager.kepware_logs:
+        if k.server_name == server_name:
+            kl = k
+            break
+    if not kl:
+        return JSONResponse({"ok": False, "error": f"找不到 server: {server_name}"})
+
+    try:
+        result = kl.trigger_backup(trigger_by="manual")
+        return JSONResponse({"ok": result.get("status") == "success", **result})
+    except Exception as ex:
+        return JSONResponse({"ok": False, "error": str(ex)})
+
+
+def _backup_schedule_path():
+    return os.path.join("data", "backup_schedule.json")
+
+
+def _load_backup_schedule():
+    import json
+    path = _backup_schedule_path()
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, ValueError):
+        return {"day_of_week": 6, "time": "02:00"}
+
+
+def _save_backup_schedule(day_of_week, time_str):
+    import json
+    os.makedirs("data", exist_ok=True)
+    with open(_backup_schedule_path(), "w") as f:
+        json.dump({"day_of_week": day_of_week, "time": time_str}, f)

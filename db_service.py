@@ -116,6 +116,18 @@ class DatabaseService:
                     created_at  TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS kepware_backups (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp   TEXT NOT NULL,
+                    server_name TEXT,
+                    status      TEXT NOT NULL,
+                    file_name   TEXT,
+                    file_size   INTEGER,
+                    duration_ms INTEGER,
+                    error_msg   TEXT,
+                    trigger_by  TEXT DEFAULT 'schedule'
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_history_ts
                     ON monitor_history(timestamp);
                 CREATE INDEX IF NOT EXISTS idx_history_device
@@ -605,6 +617,56 @@ class DatabaseService:
             total = row["cnt"] if row else 0
             hours = days * 24
             return total / hours if hours > 0 else 0
+        finally:
+            conn.close()
+
+    # ===========================================
+    # Kepware 備份
+    # ===========================================
+
+    def write_backup_record(self, server_name, status, file_name=None,
+                            file_size=None, duration_ms=None, error_msg=None,
+                            trigger_by="schedule"):
+        conn = self._get_conn()
+        try:
+            conn.execute(
+                """INSERT INTO kepware_backups
+                   (timestamp, server_name, status, file_name, file_size,
+                    duration_ms, error_msg, trigger_by)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                 server_name, status, file_name, file_size,
+                 duration_ms, error_msg, trigger_by),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def query_backups(self, server_name=None, limit=50):
+        conn = self._get_conn()
+        try:
+            sql = "SELECT * FROM kepware_backups WHERE 1=1"
+            params = []
+            if server_name:
+                sql += " AND server_name = ?"
+                params.append(server_name)
+            sql += " ORDER BY timestamp DESC LIMIT ?"
+            params.append(limit)
+            rows = conn.execute(sql, params).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_last_backup(self, server_name):
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                """SELECT * FROM kepware_backups
+                   WHERE server_name = ? AND status = 'success'
+                   ORDER BY timestamp DESC LIMIT 1""",
+                (server_name,),
+            ).fetchone()
+            return dict(row) if row else None
         finally:
             conn.close()
 

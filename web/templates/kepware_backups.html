@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+{% block title %}專案備份 - Kepware Monitor{% endblock %}
+{% block nav_backups %}active{% endblock %}
+{% block page_title %}Kepware 專案備份{% endblock %}
+{% block crumbs %}home / kepware backups{% endblock %}
+
+{% block content %}
+<!-- Backup Controls -->
+<div class="card-ui mb-4">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+        <div>
+            <h3 style="margin:0 0 4px;font-size:14px;">排程備份</h3>
+            <p style="margin:0;font-size:12px;color:var(--fg-3);" id="scheduleInfo">載入中...</p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+            <select class="select" id="backupServer" style="min-width:140px;">
+                <option value="">選擇 Server</option>
+            </select>
+            <button class="btn btn-primary" onclick="triggerBackup()" id="btnBackup">
+                <i data-lucide="download"></i>手動備份
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Schedule Settings -->
+<div class="card-ui mb-4">
+    <h3 style="margin:0 0 12px;font-size:13px;text-transform:uppercase;letter-spacing:0.05em;color:var(--fg-2);">排程設定</h3>
+    <form style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;" onsubmit="saveSchedule(); return false;">
+        <div>
+            <label class="form-label">備份週期</label>
+            <select class="select w-full" id="schedDay">
+                <option value="0">每週一</option>
+                <option value="1">每週二</option>
+                <option value="2">每週三</option>
+                <option value="3">每週四</option>
+                <option value="4">每週五</option>
+                <option value="5">每週六</option>
+                <option value="6" selected>每週日</option>
+            </select>
+        </div>
+        <div>
+            <label class="form-label">執行時間</label>
+            <input type="time" class="input w-full" id="schedTime" value="02:00">
+        </div>
+        <div>
+            <button type="submit" class="btn btn-primary"><i data-lucide="save"></i>儲存</button>
+        </div>
+    </form>
+</div>
+
+<!-- Backup Records -->
+<div class="section-hd">
+    <h2>備份記錄</h2>
+    <span class="count" id="backupCount">—</span>
+</div>
+
+<div class="card-ui">
+    <div class="tbl-wrap max-h-70vh">
+        <table>
+            <thead>
+                <tr>
+                    <th>狀態</th>
+                    <th>Server</th>
+                    <th>時間</th>
+                    <th>檔案名稱</th>
+                    <th>大小</th>
+                    <th>耗時</th>
+                    <th>觸發方式</th>
+                    <th>備註</th>
+                </tr>
+            </thead>
+            <tbody id="backupBody">
+                <tr><td colspan="8" class="text-center text-muted">載入中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+loadBackups();
+loadSchedule();
+loadServers();
+
+function loadServers() {
+    fetch('/api/kepware/health')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var sel = document.getElementById('backupServer');
+            if (!data.enabled || !data.servers) return;
+            for (var i = 0; i < data.servers.length; i++) {
+                var opt = document.createElement('option');
+                opt.value = data.servers[i].server_name;
+                opt.textContent = data.servers[i].server_name;
+                sel.appendChild(opt);
+            }
+            if (data.servers.length === 1) {
+                sel.value = data.servers[0].server_name;
+            }
+        })
+        .catch(function() {});
+}
+
+function loadSchedule() {
+    fetch('/api/kepware/backup/schedule')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var days = ['週一','週二','週三','週四','週五','週六','週日'];
+            document.getElementById('schedDay').value = data.day_of_week;
+            document.getElementById('schedTime').value = data.time;
+            document.getElementById('scheduleInfo').textContent =
+                '排程: 每' + days[data.day_of_week] + ' ' + data.time + ' 自動執行';
+        })
+        .catch(function() {
+            document.getElementById('scheduleInfo').textContent = '排程設定載入失敗';
+        });
+}
+
+function saveSchedule() {
+    var day = document.getElementById('schedDay').value;
+    var time = document.getElementById('schedTime').value;
+    fetch('/api/kepware/backup/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ day_of_week: parseInt(day), time: time })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.ok) {
+            loadSchedule();
+            alert('排程設定已儲存');
+        } else {
+            alert('儲存失敗: ' + (data.error || ''));
+        }
+    })
+    .catch(function(err) { alert('儲存失敗: ' + err); });
+}
+
+function triggerBackup() {
+    var server = document.getElementById('backupServer').value;
+    if (!server) { alert('請選擇 Server'); return; }
+
+    var btn = document.getElementById('btnBackup');
+    btn.disabled = true;
+    btn.textContent = '備份中...';
+
+    fetch('/api/kepware/backup/trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ server_name: server })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="download"></i>手動備份';
+        reinitIcons();
+        if (data.ok) {
+            loadBackups();
+        } else {
+            alert('備份失敗: ' + (data.error || ''));
+            loadBackups();
+        }
+    })
+    .catch(function(err) {
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="download"></i>手動備份';
+        reinitIcons();
+        alert('備份失敗: ' + err);
+    });
+}
+
+function loadBackups() {
+    fetch('/api/kepware/backups')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var rows = data.data || [];
+            document.getElementById('backupCount').textContent = rows.length + ' 筆';
+
+            if (rows.length === 0) {
+                document.getElementById('backupBody').innerHTML =
+                    '<tr><td colspan="8" class="text-center text-muted">尚無備份記錄</td></tr>';
+                return;
+            }
+
+            var html = '';
+            for (var i = 0; i < rows.length; i++) {
+                var r = rows[i];
+                var isOk = r.status === 'success';
+                var dotClass = isOk ? 'dot-ok' : 'dot-err';
+                var statusPill = isOk
+                    ? '<span class="pill p-ok"><span class="dot"></span>成功</span>'
+                    : '<span class="pill p-err"><span class="dot"></span>失敗</span>';
+                var size = r.file_size ? formatBytes(r.file_size) : '-';
+                var duration = r.duration_ms ? (r.duration_ms / 1000).toFixed(1) + 's' : '-';
+                var trigger = r.trigger_by === 'manual' ? '手動' : '排程';
+
+                html +=
+                    '<tr>' +
+                        '<td class="text-center"><span class="dot-inline ' + dotClass + '"></span></td>' +
+                        '<td class="td-mono nowrap" style="font-weight:600;">' + escapeHtml(r.server_name || '-') + '</td>' +
+                        '<td class="td-mono nowrap">' + escapeHtml(r.timestamp) + '</td>' +
+                        '<td class="td-mono" style="font-size:11px;">' + escapeHtml(r.file_name || '-') + '</td>' +
+                        '<td class="td-mono">' + size + '</td>' +
+                        '<td class="td-mono">' + duration + '</td>' +
+                        '<td>' + trigger + '</td>' +
+                        '<td class="td-mono" style="font-size:11px;max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(r.error_msg || '') + '</td>' +
+                    '</tr>';
+            }
+            document.getElementById('backupBody').innerHTML = html;
+        })
+        .catch(function(err) {
+            document.getElementById('backupBody').innerHTML =
+                '<tr><td colspan="8" class="text-center text-err">載入失敗: ' + err + '</td></tr>';
+        });
+}
+
+function formatBytes(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+}
+</script>
+{% endblock %}

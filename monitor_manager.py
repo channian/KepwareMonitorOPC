@@ -110,6 +110,9 @@ class MonitorManager:
         # Webhook 推播
         self.webhook = self._init_webhook()
 
+        # 備份排程
+        self.backup_schedule = self._load_backup_schedule()
+
         # OPC 連線（多 Server）
         self.connections = {}  # name -> OPCConnection
         self._parse_servers()
@@ -122,6 +125,15 @@ class MonitorManager:
 
         logging.info(f"MonitorManager 設定: 檢查間隔={self.check_interval}s, "
                      f"CSV={self.tags_csv}, Server 數={len(self.connections)}")
+
+    @staticmethod
+    def _load_backup_schedule():
+        import json
+        try:
+            with open("data/backup_schedule.json", "r") as f:
+                return json.load(f)
+        except (FileNotFoundError, ValueError):
+            return {"day_of_week": 6, "time": "02:00"}
 
     def _init_webhook(self):
         """初始化 Webhook 推播服務"""
@@ -790,6 +802,16 @@ class MonitorManager:
                     except Exception as ex:
                         logging.error(f"Kepware Log[{kl.server_name}] polling 錯誤: {ex}")
                     last_kepware_log_poll[kl.server_name] = time.time()
+
+            # Kepware 排程備份檢查
+            if hasattr(self, 'backup_schedule') and self.backup_schedule:
+                for kl in self.kepware_logs:
+                    try:
+                        await asyncio.get_event_loop().run_in_executor(
+                            None, kl.check_weekly_backup, self.backup_schedule
+                        )
+                    except Exception as ex:
+                        logging.error(f"Kepware Backup[{kl.server_name}] 檢查錯誤: {ex}")
 
             # 等待下一輪
             log_and_print(f"等待 {self.check_interval} 秒後更新...")
