@@ -119,6 +119,21 @@ class KepwareLogService:
         resp.raise_for_status()
         return resp.json()
 
+    def _api_post(self, path, params=None, timeout=60):
+        if not self._token:
+            self._login()
+
+        url = f"{self.base_url}{path}"
+        resp = requests.post(url, headers=self._headers, params=params, timeout=timeout)
+
+        if resp.status_code == 401:
+            logging.info(f"KepwareLogService[{self.server_name}]: Token 過期，重新登入")
+            self._login()
+            resp = requests.post(url, headers=self._headers, params=params, timeout=timeout)
+
+        resp.raise_for_status()
+        return resp.json()
+
     # ===========================================
     # Polling
     # ===========================================
@@ -432,36 +447,53 @@ class KepwareLogService:
     # ===========================================
 
     def trigger_backup(self, trigger_by="schedule"):
-        """呼叫 Kepware API Gateway 執行專案備份（API schema 待補）"""
+        """呼叫 Kepware API Gateway 執行專案備份"""
         import time as _time
         start = _time.time()
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_path = f"Project Backups\\KepwareBackup_{timestamp}.opf"
+        file_name = f"KepwareBackup_{timestamp}.opf"
+
         try:
-            # TODO: 等 API schema 確認後實作實際呼叫
-            # resp = self._api_get("/api/backup/trigger") 或 POST
-            # file_name = resp.get("file_name")
-            # file_size = resp.get("file_size")
-
-            raise NotImplementedError(
-                "備份 API 尚未實作，請提供 Kepware API Gateway 的備份 schema"
+            resp = self._api_post(
+                "/api/services/save",
+                params={"file_path": file_path},
+                timeout=60,
             )
+            elapsed = int((_time.time() - start) * 1000)
 
-        except NotImplementedError:
+            if resp.get("success"):
+                self.db.write_backup_record(
+                    server_name=self.server_name,
+                    status="success",
+                    file_name=file_name,
+                    trigger_by=trigger_by,
+                    duration_ms=elapsed,
+                )
+                logging.info(f"KepwareLogService[{self.server_name}] "
+                             f"備份成功: {file_name} ({elapsed}ms)")
+                return {"status": "success", "file_name": file_name}
+
+            error_msg = resp.get("message", "未知錯誤")
             self.db.write_backup_record(
                 server_name=self.server_name,
-                status="pending",
-                error_msg="API schema 待設定",
+                status="failed",
+                file_name=file_name,
+                error_msg=error_msg,
                 trigger_by=trigger_by,
-                duration_ms=int((_time.time() - start) * 1000),
+                duration_ms=elapsed,
             )
-            logging.warning(f"KepwareLogService[{self.server_name}] "
-                            f"備份 API 尚未實作")
-            return {"status": "pending", "error": "API schema 待設定"}
+            logging.error(f"KepwareLogService[{self.server_name}] "
+                          f"備份失敗: {error_msg}")
+            return {"status": "failed", "error": error_msg}
 
         except Exception as ex:
             elapsed = int((_time.time() - start) * 1000)
             self.db.write_backup_record(
                 server_name=self.server_name,
                 status="failed",
+                file_name=file_name,
                 error_msg=str(ex),
                 trigger_by=trigger_by,
                 duration_ms=elapsed,
