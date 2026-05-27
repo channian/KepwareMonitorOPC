@@ -6,7 +6,8 @@
 
 - **多台 Kepware Server** — 同時監控多台 OPC UA Server
 - **彈性閾值設定** — 支援數值比較（大於/小於/等於）、布林判斷、數值不變偵測、動態閥值（移動平均 ± k*σ）、純記錄模式
-- **Kepware Event Log 監控** — 整合 Kepware API Gateway，自動分類事件嚴重等級（Critical/Warning/Advisory），自適應閥值派報，統計圖表可視化
+- **Kepware Event Log 監控** — 整合 Kepware API Gateway，自動分類事件嚴重等級（Critical/Warning/Advisory），自適應閥值派報
+- **Kepware 專案備份** — 透過 API Gateway 執行 Kepware 專案備份，支援手動觸發與每週排程，備份記錄可追溯
 - **累積觸發機制** — 連續 N 次異常才派報，避免瞬間抖動誤報
 - **復歸通知** — 設備恢復正常時自動發送復歸通知
 - **三層式網路診斷** — Ping 主機、TCP Port 檢測、設備 IP 檢測，定位斷線層級
@@ -157,7 +158,9 @@ Port = 8080
 | 儀表板 | 即時監控狀態（SSE 自動更新） |
 | 歷史紀錄 | 查詢與匯出設備數值歷史（CSV） |
 | 派報紀錄 | 查詢異常/復歸通知紀錄 |
-| 設備管理 | 線上編輯 tags.csv |
+| Kepware 事件 | 事件記錄 / 操作記錄查詢（依日期、Channel、嚴重等級篩選） |
+| 專案備份 | 手動 / 排程備份管理，備份記錄查詢 |
+| Tags 管理 | 線上編輯 tags.csv |
 | 系統設定 | 線上編輯 settings.ini（含 Webhook 測試按鈕） |
 | 帳號管理 | 使用者 CRUD、角色權限 |
 
@@ -235,7 +238,8 @@ Kepware API Gateway（獨立服務，每台 Kepware 各一個）
     ├→ 定期 polling events / transactions
     ├→ 事件分類 + 去重 + 異常偵測
     ├→ 派報（Email / Webhook）
-    └→ Web UI 查詢 + 統計圖表
+    ├→ Web UI 查詢
+    └→ 專案備份（手動 / 排程）
 ```
 
 ### 事件嚴重等級分類規則
@@ -309,7 +313,51 @@ PollInterval = 600
 |-----|------|
 | 事件記錄 | 依日期/Channel/事件等級/嚴重等級篩選，顯示 Server、Severity、Tag Address |
 | 操作記錄 | Kepware Config API 操作紀錄（GET/POST/PUT/DELETE） |
-| 統計圖表 | 每日事件趨勢（依嚴重等級堆疊）、Channel 事件分佈（水平柱狀圖） |
+
+### 多台 Kepware 帳號設定
+
+每台 Kepware 的 API Gateway 帳號密碼**各自獨立**，在對應的 `[KepwareLog.xxx]` section 中分別設定：
+
+```ini
+[KepwareLog.kepware_a]
+Enable = true
+ApiBaseUrl = http://192.168.1.10:8000
+Username = admin_a
+Password = password_a
+
+[KepwareLog.kepware_b]
+Enable = true
+ApiBaseUrl = http://10.0.0.5:8000
+Username = admin_b
+Password = password_b
+```
+
+佈署第二台時，只需新增一個 `[KepwareLog.kepware_b]` section，填入該台 Gateway 的連線資訊與帳密即可。
+
+## Kepware 專案備份
+
+透過 API Gateway 呼叫 Kepware ProjectSave 服務，定期備份專案檔。
+
+### 功能
+
+- **手動觸發** — Web UI 選擇 Server 後一鍵備份
+- **每週排程** — 可設定每週幾、幾點自動執行（預設週日 02:00）
+- **備份記錄** — 每次備份結果（成功/失敗、檔名、耗時、錯誤訊息）寫入 DB 可追溯
+- **多台支援** — 排程會自動對所有已啟用的 Kepware Server 執行備份
+
+### 排程設定
+
+排程設定儲存在 `data/backup_schedule.json`，可在 Web UI「專案備份」頁面調整：
+
+```json
+{"day_of_week": 6, "time": "02:00"}
+```
+
+> `day_of_week`: 0=週一 ... 6=週日
+
+### 備份檔案
+
+備份檔自動存放在 Kepware 資料目錄的 `Project Backups\` 子資料夾，檔名格式：`KepwareBackup_YYYYMMDD_HHMMSS.opf`。
 
 ## 動態閥值（Tag 監控）
 
@@ -343,6 +391,104 @@ Name,NodeId,Type,Condition,Threshold,CountNeeded,Enable
 DynamicWindow = 24    # 回看歷史筆數
 DynamicK = 3.0        # 預設 k 值
 ```
+
+## 佈署為 Windows 服務（PyInstaller + WinSW）
+
+由於 `asyncua` 套件僅支援特定版本的 Python，建議使用 PyInstaller 封裝成執行檔後，再透過 WinSW 註冊為 Windows Service。
+
+### 1. 安裝 PyInstaller
+
+```bash
+pip install pyinstaller
+```
+
+### 2. 打包執行檔
+
+```bash
+pyinstaller --onefile --name KepwareMonitor ^
+    --add-data "web/templates;web/templates" ^
+    --add-data "web/static;web/static" ^
+    --hidden-import uvicorn.logging ^
+    --hidden-import uvicorn.loops.auto ^
+    --hidden-import uvicorn.protocols.http.auto ^
+    --hidden-import uvicorn.protocols.websockets.auto ^
+    --hidden-import uvicorn.lifespan.on ^
+    kepware_monitor.py
+```
+
+產出檔案在 `dist/KepwareMonitor.exe`。
+
+> **注意：** 若有其他動態 import（如 `asyncua` 子模組），可能需追加 `--hidden-import`。打包後先手動執行 `dist\KepwareMonitor.exe` 確認無 ModuleNotFoundError。
+
+### 3. 佈署目錄結構
+
+將以下檔案複製到目標主機（例如 `C:\KepwareMonitor\`）：
+
+```
+C:\KepwareMonitor\
+├── KepwareMonitor.exe          # PyInstaller 產出
+├── Config\
+│   ├── settings.ini            # 設定檔
+│   └── tags.csv                # 監控設備
+├── data\                       # 自動產生（DB、排程、marker）
+├── logs\                       # 自動產生
+├── KepwareMonitor.xml          # WinSW 設定檔
+└── WinSW.exe                   # WinSW 執行檔（重新命名）
+```
+
+### 4. 下載 WinSW
+
+從 [WinSW Releases](https://github.com/winsw/winsw/releases) 下載 `WinSW-x64.exe`，重新命名為 `KepwareMonitor.exe` 同目錄下的 `KepwareMonitorSvc.exe`（或任意名稱，但 XML 檔名需對應）。
+
+### 5. 建立 WinSW 設定檔
+
+建立 `KepwareMonitorSvc.xml`（檔名需與 WinSW exe 同名）：
+
+```xml
+<service>
+  <id>KepwareMonitor</id>
+  <name>Kepware Monitor OPC</name>
+  <description>Kepware OPC UA 監控系統 - 設備監控、事件記錄、專案備份</description>
+  <executable>%BASE%\KepwareMonitor.exe</executable>
+  <startmode>Automatic</startmode>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="none"/>
+</service>
+```
+
+### 6. 安裝與管理服務
+
+以**系統管理員**身分開啟命令提示字元：
+
+```cmd
+cd C:\KepwareMonitor
+
+:: 安裝服務
+KepwareMonitorSvc.exe install
+
+:: 啟動服務
+KepwareMonitorSvc.exe start
+
+:: 查看狀態
+KepwareMonitorSvc.exe status
+
+:: 停止服務
+KepwareMonitorSvc.exe stop
+
+:: 移除服務
+KepwareMonitorSvc.exe uninstall
+```
+
+### 7. 驗證
+
+1. 服務啟動後，瀏覽 `http://localhost:8080` 確認 Web UI 正常
+2. 檢查 `logs\` 目錄下的日誌確認監控運作
+3. 檢查 Windows 事件檢視器（應用程式日誌）確認服務狀態
 
 ## License
 

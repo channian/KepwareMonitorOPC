@@ -128,7 +128,7 @@ input, select, textarea { font-family: inherit; }
 .avatar-menu-divider { border-top: 1px solid var(--border-1); margin: 4px 0; }
 
 /* ---------- Buttons ---------- */
-.btn { display: inline-flex; align-items: center; gap: 7px; padding: 9px 16px; border-radius: var(--r-sm); font-size: var(--fs-sm); font-weight: 600; transition: all 180ms var(--ease); line-height: 1; white-space: nowrap; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 9px 16px; border-radius: var(--r-sm); font-size: var(--fs-sm); font-weight: 600; transition: all 180ms var(--ease); line-height: 1; white-space: nowrap; }
 .btn:hover { transform: translateY(-1px); }
 .btn:active { transform: translateY(0); }
 .btn i[data-lucide] { width: 15px; height: 15px; }
