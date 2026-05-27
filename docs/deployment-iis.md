@@ -1,6 +1,9 @@
 # IIS + WinSW 部署指南
 
-本文件說明如何在 Windows Server 環境中，使用 IIS 反向代理 + WinSW 服務包裝，將 KepwareMonitorOPC 部署為正式服務。
+本文件說明如何在 Windows Server 環境中，使用 IIS 反向代理 + WinSW 服務包裝，將 KepwareMonitorOPC 部署為正式服務。支援兩種佈署方式：
+
+- **方式 A：Python 虛擬環境** — 直接用 venv 執行（適合有 Python 環境的主機）
+- **方式 B：PyInstaller 封裝** — 打包成單一 exe（適合無 Python 或 asyncua 需要特定 Python 版本的主機）
 
 ## 架構
 
@@ -13,7 +16,7 @@ uvicorn (FastAPI)
     ↓
 kepware_monitor.py (主程式)
     ├→ OPC UA 連線 (讀取設備數值)
-    ├→ Kepware API Gateway (事件 polling)
+    ├→ Kepware API Gateway (事件 polling + 專案備份)
     ├→ SQLite (資料儲存)
     └→ Email / Webhook (派報)
 ```
@@ -23,12 +26,14 @@ kepware_monitor.py (主程式)
 | 項目 | 版本/說明 |
 |------|----------|
 | Windows Server | 2016 / 2019 / 2022 |
-| Python | 3.8+ (建議 3.10+) |
+| Python | 3.8+ (建議 3.10+)，方式 B 僅開發機需要 |
 | .NET Framework | 4.6.1+ (WinSW 需要，Windows Server 內建) |
 | IIS | 選用，需安裝 ARR + URL Rewrite 模組 |
 | 網路 | 可連線 Kepware OPC UA Server |
 
-## 步驟 1：Python 環境
+## 方式 A：Python 虛擬環境佈署
+
+### 步驟 A1：Python 環境
 
 ```powershell
 # 建立專案目錄
@@ -65,7 +70,7 @@ Host = 127.0.0.1
 Port = 8080
 ```
 
-## 步驟 2：測試啟動
+### 步驟 A2：測試啟動
 
 先手動確認程式可以正常運行：
 
@@ -80,28 +85,28 @@ Port = 8080
 
 確認無誤後 `Ctrl+C` 停止程式。
 
-## 步驟 3：WinSW 服務包裝
+### 步驟 A3：WinSW 服務包裝
 
-### 下載 WinSW
+#### 下載 WinSW
 
 1. 前往 [WinSW Releases](https://github.com/winsw/winsw/releases)
 2. 下載 `WinSW-x64.exe`
-3. 重新命名為 `KepwareMonitor.exe`，放到專案目錄
+3. 重新命名為 `KepwareMonitorSvc.exe`，放到專案目錄
 
 ```powershell
 # 下載並重命名
-curl -L -o C:\Services\KepwareMonitor\KepwareMonitor.exe https://github.com/winsw/winsw/releases/download/v3.0.0-alpha.11/WinSW-x64.exe
+curl -L -o C:\Services\KepwareMonitor\KepwareMonitorSvc.exe https://github.com/winsw/winsw/releases/download/v3.0.0-alpha.11/WinSW-x64.exe
 ```
 
-### 建立服務設定檔
+#### 建立服務設定檔
 
-在同一目錄建立 `KepwareMonitor.xml`（檔名必須與 exe 一致）：
+在同一目錄建立 `KepwareMonitorSvc.xml`（檔名必須與 WinSW exe 同名）：
 
 ```xml
 <service>
   <id>KepwareMonitor</id>
   <name>Kepware Monitor OPC</name>
-  <description>Kepware OPC UA 監控服務 — 設備數值監控、事件 Log 監控、Web UI</description>
+  <description>Kepware OPC UA 監控服務 — 設備數值監控、事件記錄、專案備份、Web UI</description>
 
   <!-- Python 執行檔與啟動參數 -->
   <executable>%BASE%\venv\Scripts\python.exe</executable>
@@ -130,28 +135,120 @@ curl -L -o C:\Services\KepwareMonitor\KepwareMonitor.exe https://github.com/wins
 </service>
 ```
 
-### 安裝與管理
+---
+
+## 方式 B：PyInstaller 封裝佈署
+
+適用於目標主機沒有 Python 環境，或 `asyncua` 套件僅相容特定 Python 版本的情況。在開發機打包後，僅需部署 exe + 設定檔。
+
+### 步驟 B1：在開發機打包
+
+```powershell
+# 安裝 PyInstaller（開發機）
+pip install pyinstaller
+
+# 打包成單一執行檔
+pyinstaller --onefile --name KepwareMonitor ^
+    --add-data "web/templates;web/templates" ^
+    --add-data "web/static;web/static" ^
+    --hidden-import uvicorn.logging ^
+    --hidden-import uvicorn.loops.auto ^
+    --hidden-import uvicorn.protocols.http.auto ^
+    --hidden-import uvicorn.protocols.websockets.auto ^
+    --hidden-import uvicorn.lifespan.on ^
+    kepware_monitor.py
+```
+
+產出檔案在 `dist\KepwareMonitor.exe`。
+
+> **注意：** 若執行時出現 `ModuleNotFoundError`，需追加對應的 `--hidden-import`。常見需要追加的模組：
+> - `asyncua` 的子模組（如 `asyncua.crypto`）
+> - `jinja2.ext`
+> - `email.mime.multipart`、`email.mime.text`（Email 相關）
+>
+> 打包後務必先在開發機手動執行 `dist\KepwareMonitor.exe` 確認無誤。
+
+### 步驟 B2：測試啟動
+
+```powershell
+cd dist
+mkdir Config
+copy ..\Config\settings.example.ini Config\settings.ini
+copy ..\Config\tags.example.csv Config\tags.csv
+
+# 編輯 Config\settings.ini 後測試
+.\KepwareMonitor.exe
+```
+
+確認 Web UI (`http://localhost:8080`) 與 OPC 連線正常後 `Ctrl+C` 停止。
+
+### 步驟 B3：WinSW 服務包裝
+
+#### 下載 WinSW
+
+```powershell
+curl -L -o C:\Services\KepwareMonitor\KepwareMonitorSvc.exe https://github.com/winsw/winsw/releases/download/v3.0.0-alpha.11/WinSW-x64.exe
+```
+
+#### 建立服務設定檔
+
+建立 `KepwareMonitorSvc.xml`（檔名必須與 WinSW exe 同名）：
+
+```xml
+<service>
+  <id>KepwareMonitor</id>
+  <name>Kepware Monitor OPC</name>
+  <description>Kepware OPC UA 監控服務 — 設備數值監控、事件記錄、專案備份、Web UI</description>
+
+  <!-- PyInstaller 封裝的執行檔 -->
+  <executable>%BASE%\KepwareMonitor.exe</executable>
+  <workingdirectory>%BASE%</workingdirectory>
+
+  <!-- 服務啟動方式 -->
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+
+  <!-- 異常退出時自動重啟 -->
+  <onfailure action="restart" delay="10 sec" />
+  <onfailure action="restart" delay="30 sec" />
+  <onfailure action="restart" delay="60 sec" />
+  <resetfailure>1 hour</resetfailure>
+
+  <!-- 日誌設定（自動 rotate） -->
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+    <logpath>%BASE%\logs</logpath>
+  </log>
+</service>
+```
+
+> **方式 B 與 A 的差異：** `<executable>` 指向 `KepwareMonitor.exe`（PyInstaller 產出），不需 `<arguments>` 和 `venv`。
+
+## 安裝與管理服務（A / B 共用）
+
+以**系統管理員**身分開啟命令提示字元：
 
 ```powershell
 cd C:\Services\KepwareMonitor
 
 # 安裝服務
-.\KepwareMonitor.exe install
+.\KepwareMonitorSvc.exe install
 
 # 啟動
-.\KepwareMonitor.exe start
+.\KepwareMonitorSvc.exe start
 
 # 查看狀態
-.\KepwareMonitor.exe status
+.\KepwareMonitorSvc.exe status
 
 # 停止
-.\KepwareMonitor.exe stop
+.\KepwareMonitorSvc.exe stop
 
 # 重啟
-.\KepwareMonitor.exe restart
+.\KepwareMonitorSvc.exe restart
 
 # 移除服務（需先停止）
-.\KepwareMonitor.exe uninstall
+.\KepwareMonitorSvc.exe uninstall
 ```
 
 也可以用 Windows 標準指令管理：
@@ -174,9 +271,9 @@ Get-Service KepwareMonitor
 | `delayedAutoStart` | 延遲啟動，等其他服務就緒後再啟動 |
 | `onfailure` | 可設定多層重啟策略（10s → 30s → 60s） |
 | `log mode="roll-by-size"` | 日誌自動 rotate，每 10MB 滾動，保留 5 個檔案 |
-| `PYTHONUNBUFFERED` | 確保 Python 輸出即時寫入日誌 |
+| `PYTHONUNBUFFERED` | 確保 Python 輸出即時寫入日誌（方式 A） |
 
-## 步驟 4：IIS 反向代理（選用）
+## IIS 反向代理（選用）
 
 > 如果不需要自訂域名或 HTTPS，可以跳過此步驟，直接用 `http://伺服器IP:8080` 存取。
 
@@ -240,7 +337,7 @@ Get-Service KepwareMonitor
 3. 選取憑證
 4. （選用）新增 HTTP → HTTPS 重導向規則
 
-## 步驟 5：驗證
+## 驗證
 
 ### 確認服務運行
 
@@ -250,14 +347,14 @@ Get-Service KepwareMonitor
 
 # 檢查 WinSW 狀態
 cd C:\Services\KepwareMonitor
-.\KepwareMonitor.exe status
+.\KepwareMonitorSvc.exe status
 
 # 檢查 Port 監聽
 netstat -an | findstr "8080"
 
 # 查看服務日誌
-type logs\KepwareMonitor.out.log
-type logs\KepwareMonitor.err.log
+type logs\KepwareMonitorSvc.out.log
+type logs\KepwareMonitorSvc.err.log
 ```
 
 ### 健康檢查
@@ -303,12 +400,16 @@ curl http://kepware-monitor.company.com/api/health
 
 ```powershell
 # 查看 WinSW 日誌
-type C:\Services\KepwareMonitor\logs\KepwareMonitor.err.log
-type C:\Services\KepwareMonitor\logs\KepwareMonitor.wrapper.log
+type C:\Services\KepwareMonitor\logs\KepwareMonitorSvc.err.log
+type C:\Services\KepwareMonitor\logs\KepwareMonitorSvc.wrapper.log
 
-# 手動測試
+# 手動測試（方式 A）
 cd C:\Services\KepwareMonitor
 .\venv\Scripts\python.exe kepware_monitor.py
+
+# 手動測試（方式 B）
+cd C:\Services\KepwareMonitor
+.\KepwareMonitor.exe
 ```
 
 ### IIS 502 Bad Gateway
@@ -325,11 +426,13 @@ cd C:\Services\KepwareMonitor
 
 ### 程式更新
 
+**方式 A（venv）：**
+
 ```powershell
 cd C:\Services\KepwareMonitor
 
 # 1. 停止服務
-.\KepwareMonitor.exe stop
+.\KepwareMonitorSvc.exe stop
 
 # 2. 更新檔案（保留 Config、data、logs）
 xcopy /E /Y \\source\KepwareMonitorOPC . /EXCLUDE:exclude.txt
@@ -338,28 +441,68 @@ xcopy /E /Y \\source\KepwareMonitorOPC . /EXCLUDE:exclude.txt
 .\venv\Scripts\pip.exe install -r requirements.txt
 
 # 4. 重啟服務
-.\KepwareMonitor.exe start
+.\KepwareMonitorSvc.exe start
+```
+
+**方式 B（PyInstaller）：**
+
+```powershell
+cd C:\Services\KepwareMonitor
+
+# 1. 停止服務
+.\KepwareMonitorSvc.exe stop
+
+# 2. 替換執行檔（在開發機重新打包後複製過來）
+copy /Y \\source\dist\KepwareMonitor.exe .
+
+# 3. 重啟服務
+.\KepwareMonitorSvc.exe start
 ```
 
 ## 目錄結構（部署後）
 
+### 方式 A（venv）
+
 ```
 C:\Services\KepwareMonitor\
-├── KepwareMonitor.exe       # WinSW 執行檔
-├── KepwareMonitor.xml       # WinSW 服務設定
+├── KepwareMonitorSvc.exe    # WinSW 執行檔
+├── KepwareMonitorSvc.xml    # WinSW 服務設定
 ├── venv\                    # Python 虛擬環境
 ├── Config\
 │   ├── settings.ini         # 設定檔
 │   └── tags.csv             # 監控設備清單
 ├── data\
-│   └── monitor.db           # SQLite 資料庫
+│   ├── monitor.db           # SQLite 資料庫
+│   └── backup_schedule.json # 備份排程設定
 ├── logs\
-│   ├── KepwareMonitor.out.log    # stdout（自動 rotate）
-│   ├── KepwareMonitor.err.log    # stderr（自動 rotate）
-│   ├── KepwareMonitor.wrapper.log # WinSW 本身日誌
-│   └── *.log                     # 應用程式日誌
+│   ├── KepwareMonitorSvc.out.log    # stdout（自動 rotate）
+│   ├── KepwareMonitorSvc.err.log    # stderr（自動 rotate）
+│   ├── KepwareMonitorSvc.wrapper.log # WinSW 本身日誌
+│   └── *.log                        # 應用程式日誌
 ├── web\                     # Web UI
 ├── kepware_monitor.py       # 主程式
 ├── requirements.txt
 └── ...
 ```
+
+### 方式 B（PyInstaller）
+
+```
+C:\Services\KepwareMonitor\
+├── KepwareMonitor.exe       # PyInstaller 封裝的主程式
+├── KepwareMonitorSvc.exe    # WinSW 執行檔
+├── KepwareMonitorSvc.xml    # WinSW 服務設定
+├── Config\
+│   ├── settings.ini         # 設定檔
+│   └── tags.csv             # 監控設備清單
+├── data\
+│   ├── monitor.db           # SQLite 資料庫
+│   └── backup_schedule.json # 備份排程設定
+└── logs\
+    ├── KepwareMonitorSvc.out.log    # stdout（自動 rotate）
+    ├── KepwareMonitorSvc.err.log    # stderr（自動 rotate）
+    ├── KepwareMonitorSvc.wrapper.log # WinSW 本身日誌
+    └── *.log                        # 應用程式日誌
+```
+
+> **注意：** 方式 B 不需要 `venv\`、`web\`、`*.py` 等原始碼，PyInstaller 已將所有 Python 程式碼和靜態資源打包進 `KepwareMonitor.exe`。
