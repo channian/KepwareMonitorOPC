@@ -451,19 +451,12 @@ class KepwareLogService:
         import time as _time
         start = _time.time()
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        file_path = f"Project Backups\\KepwareBackup_{timestamp}.opf"
-        file_name = f"KepwareBackup_{timestamp}.opf"
-
         try:
-            resp = self._api_post(
-                "/api/services/save",
-                params={"file_path": file_path},
-                timeout=60,
-            )
+            resp = self._api_post("/api/backup/save", timeout=60)
             elapsed = int((_time.time() - start) * 1000)
 
             if resp.get("success"):
+                file_name = resp.get("message", "")
                 self.db.write_backup_record(
                     server_name=self.server_name,
                     status="success",
@@ -479,7 +472,6 @@ class KepwareLogService:
             self.db.write_backup_record(
                 server_name=self.server_name,
                 status="failed",
-                file_name=file_name,
                 error_msg=error_msg,
                 trigger_by=trigger_by,
                 duration_ms=elapsed,
@@ -493,7 +485,6 @@ class KepwareLogService:
             self.db.write_backup_record(
                 server_name=self.server_name,
                 status="failed",
-                file_name=file_name,
                 error_msg=str(ex),
                 trigger_by=trigger_by,
                 duration_ms=elapsed,
