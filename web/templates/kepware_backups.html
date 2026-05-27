@@ -17,7 +17,7 @@
                 <option value="">選擇 Server</option>
             </select>
             <button class="btn btn-primary" onclick="triggerBackup()" id="btnBackup">
-                <i data-lucide="download"></i>手動備份
+                <i data-lucide="download"></i><span>手動備份</span>
             </button>
         </div>
     </div>
@@ -44,7 +44,7 @@
             <input type="time" class="input w-full" id="schedTime" value="02:00">
         </div>
         <div>
-            <button type="submit" class="btn btn-primary"><i data-lucide="save"></i>儲存</button>
+            <button type="submit" class="btn btn-primary"><i data-lucide="save"></i><span>儲存</span></button>
         </div>
     </form>
 </div>
@@ -154,7 +154,7 @@ function triggerBackup() {
     .then(function(r) { return r.json(); })
     .then(function(data) {
         btn.disabled = false;
-        btn.innerHTML = '<i data-lucide="download"></i>手動備份';
+        btn.innerHTML = '<i data-lucide="download"></i><span>手動備份</span>';
         reinitIcons();
         if (data.ok) {
             loadBackups();
@@ -165,7 +165,7 @@ function triggerBackup() {
     })
     .catch(function(err) {
         btn.disabled = false;
-        btn.innerHTML = '<i data-lucide="download"></i>手動備份';
+        btn.innerHTML = '<i data-lucide="download"></i><span>手動備份</span>';
         reinitIcons();
         alert('備份失敗: ' + err);
     });
