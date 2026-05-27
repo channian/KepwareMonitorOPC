@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Kepware Monitor{% endblock %}</title>
-    <link href="/static/css/style.css?v=5" rel="stylesheet">
+    <link href="/static/css/style.css?v=6" rel="stylesheet">
     <script src="/static/js/lucide.min.js"></script>
     {% block head %}{% endblock %}
 </head>
@@ -124,8 +124,15 @@
         </div>
     </div>
 
-    <script src="/static/js/app.js?v=2"></script>
+    <script src="/static/js/app.js?v=3"></script>
     {% block scripts %}{% endblock %}
-    <script>try { lucide.createIcons(); } catch(e) { console.warn('Lucide icons not loaded:', e); }</script>
+    <script>
+    try {
+        lucide.createIcons();
+        // Fix SVG sizes after Lucide renders — setAttribute overrides CSS in some browsers
+        document.querySelectorAll('.btn svg').forEach(function(s) { s.setAttribute('width','15'); s.setAttribute('height','15'); });
+        document.querySelectorAll('.nav-item svg').forEach(function(s) { s.setAttribute('width','18'); s.setAttribute('height','18'); });
+    } catch(e) { console.warn('Lucide icons not loaded:', e); }
+    </script>
 </body>
 </html>

@@ -83,5 +83,8 @@ function escapeHtml(text) {
 }
 
 function reinitIcons() {
-    if (typeof lucide !== 'undefined') lucide.createIcons();
+    if (typeof lucide === 'undefined') return;
+    lucide.createIcons();
+    document.querySelectorAll('.btn svg').forEach(function(s) { s.setAttribute('width','15'); s.setAttribute('height','15'); });
+    document.querySelectorAll('.nav-item svg').forEach(function(s) { s.setAttribute('width','18'); s.setAttribute('height','18'); });
 }

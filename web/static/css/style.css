@@ -132,7 +132,7 @@ input, select, textarea { font-family: inherit; }
 .btn:hover { transform: translateY(-1px); }
 .btn:active { transform: translateY(0); }
 .btn i[data-lucide] { width: 15px; height: 15px; }
-.btn svg { width: 15px; height: 15px; flex-shrink: 0; vertical-align: middle; }
+.btn svg { width: 15px !important; height: 15px !important; flex-shrink: 0; }
 .btn-primary { background: var(--blue); color: #fff; box-shadow: var(--glow-blue); }
 .btn-primary:hover { background: var(--blue-hover); }
 .btn-accent { background: var(--accent); color: #03181c; box-shadow: var(--glow-accent); }
