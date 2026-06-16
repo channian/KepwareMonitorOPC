@@ -10,9 +10,9 @@
     <span class="count" id="pageInfo">—</span>
     <div class="actions">
         <input type="file" id="csvFileInput" accept=".csv" class="d-none" onchange="handleCsvUpload(this)">
-        <button class="btn btn-ghost" onclick="document.getElementById('csvFileInput').click()"><i data-lucide="upload"></i>匯入 CSV</button>
-        <button class="btn btn-ghost" onclick="exportCsv()"><i data-lucide="download"></i>匯出 CSV</button>
-        <button class="btn btn-accent btn-sm" onclick="addRow()"><i data-lucide="plus"></i>新增點位</button>
+        <button class="btn" style="background:var(--muted-bg);color:var(--fg-2);border:1px solid var(--border-2);" onclick="document.getElementById('csvFileInput').click()">匯入 CSV</button>
+        <button class="btn" style="background:var(--muted-bg);color:var(--fg-2);border:1px solid var(--border-2);" onclick="exportCsv()">匯出 CSV</button>
+        <button class="btn" style="background:var(--accent-soft);color:var(--accent);border:1px solid rgba(34,211,238,0.3);" onclick="addRow()">新增點位</button>
         <button class="btn" style="background:var(--blue-soft);color:var(--blue);border:1px solid rgba(59,130,246,0.3);" onclick="saveTags()">儲存</button>
     </div>
 </div>
@@ -125,7 +125,7 @@ function renderTable() {
     for (var idx = 0; idx < pageIndices.length; idx++) {
         var i = pageIndices[idx];
         html += '<tr>';
-        html += '<td><button class="btn btn-danger btn-xs" onclick="deleteRow(' + i + ')" title="刪除"><i data-lucide="trash-2"></i></button></td>';
+        html += '<td><button class="btn btn-xs" style="background:var(--err-bg);color:var(--err);border:1px solid rgba(239,68,68,0.3);" onclick="deleteRow(' + i + ')" title="刪除">刪除</button></td>';
         for (var c = 0; c < tagHeaders.length; c++) {
             var col = tagHeaders[c];
             var val = tagRows[i][col] || '';
