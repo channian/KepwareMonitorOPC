@@ -64,6 +64,7 @@ class KepwareLogService:
         self._headers = {}
         self._last_event_ts = None
         self._last_tx_ts = None
+        self._session = requests.Session()
 
         self._summary_marker_dir = Path("data")
         self._summary_marker_dir.mkdir(parents=True, exist_ok=True)
@@ -91,7 +92,7 @@ class KepwareLogService:
 
     def _login(self):
         try:
-            resp = requests.post(
+            resp = self._session.post(
                 f"{self.base_url}/api/auth/login",
                 json={"username": self.username, "password": self.password},
                 timeout=15,
@@ -99,6 +100,7 @@ class KepwareLogService:
             resp.raise_for_status()
             self._token = resp.json()["access_token"]
             self._headers = {"Authorization": f"Bearer {self._token}"}
+            self._session.headers.update(self._headers)
             logging.info(f"KepwareLogService[{self.server_name}]: JWT 登入成功")
         except Exception as ex:
             logging.error(f"KepwareLogService[{self.server_name}]: JWT 登入失敗: {ex}")
@@ -109,12 +111,12 @@ class KepwareLogService:
             self._login()
 
         url = f"{self.base_url}{path}"
-        resp = requests.get(url, headers=self._headers, timeout=30)
+        resp = self._session.get(url, timeout=30)
 
         if resp.status_code == 401:
             logging.info(f"KepwareLogService[{self.server_name}]: Token 過期，重新登入")
             self._login()
-            resp = requests.get(url, headers=self._headers, timeout=30)
+            resp = self._session.get(url, timeout=30)
 
         resp.raise_for_status()
         return resp.json()
@@ -124,12 +126,12 @@ class KepwareLogService:
             self._login()
 
         url = f"{self.base_url}{path}"
-        resp = requests.post(url, headers=self._headers, params=params, timeout=timeout)
+        resp = self._session.post(url, params=params, timeout=timeout)
 
         if resp.status_code == 401:
             logging.info(f"KepwareLogService[{self.server_name}]: Token 過期，重新登入")
             self._login()
-            resp = requests.post(url, headers=self._headers, params=params, timeout=timeout)
+            resp = self._session.post(url, params=params, timeout=timeout)
 
         resp.raise_for_status()
         return resp.json()
@@ -516,8 +518,8 @@ class KepwareLogService:
             pass
 
         logging.info(f"KepwareLogService[{self.server_name}] 排程備份觸發")
-        self.trigger_backup(trigger_by="schedule")
         marker_path.write_text(today_str)
+        self.trigger_backup(trigger_by="schedule")
 
     # ===========================================
     # 派報

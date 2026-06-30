@@ -796,7 +796,7 @@ class MonitorManager:
                 last_t = last_kepware_log_poll.get(kl.server_name, 0)
                 if (now - last_t) >= kl.poll_interval:
                     try:
-                        await asyncio.get_event_loop().run_in_executor(
+                        await asyncio.get_running_loop().run_in_executor(
                             None, kl.poll
                         )
                     except Exception as ex:
@@ -807,7 +807,7 @@ class MonitorManager:
             if hasattr(self, 'backup_schedule') and self.backup_schedule:
                 for kl in self.kepware_logs:
                     try:
-                        await asyncio.get_event_loop().run_in_executor(
+                        await asyncio.get_running_loop().run_in_executor(
                             None, kl.check_weekly_backup, self.backup_schedule
                         )
                     except Exception as ex:

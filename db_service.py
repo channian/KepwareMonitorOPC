@@ -27,6 +27,8 @@ class DatabaseService:
     def _get_conn(self):
         conn = sqlite3.connect(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
         return conn
 
     def _init_db(self):
@@ -144,6 +146,16 @@ class DatabaseService:
                     ON kepware_events(dedup_hash);
                 CREATE INDEX IF NOT EXISTS idx_kep_tx_ts
                     ON kepware_transactions(timestamp);
+                CREATE INDEX IF NOT EXISTS idx_history_server
+                    ON monitor_history(server_name);
+                CREATE INDEX IF NOT EXISTS idx_kep_event_server
+                    ON kepware_events(server_name);
+                CREATE INDEX IF NOT EXISTS idx_kep_tx_server
+                    ON kepware_transactions(server_name);
+                CREATE INDEX IF NOT EXISTS idx_kep_tx_dedup
+                    ON kepware_transactions(timestamp, user, action, endpoint);
+                CREATE INDEX IF NOT EXISTS idx_backup_server
+                    ON kepware_backups(server_name);
             """)
             conn.commit()
 
