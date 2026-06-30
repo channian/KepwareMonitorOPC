@@ -685,7 +685,7 @@ async def api_change_password(request: Request):
     if not auth:
         return JSONResponse({"error": "舊密碼錯誤"}, status_code=400)
 
-    db_service.update_user(user["user_id"], password=new_pw)
+    db_service.update_user(user["id"], password=new_pw)
     return JSONResponse({"ok": True})
 
 
