@@ -1,0 +1,5 @@
+# Kepware Monitor OPC - 開發/測試用相依套件
+# 僅開發環境需要，不隨主程式打包部署（PyInstaller build 不需安裝本檔案）
+
+# 單元測試框架
+pytest>=7.0.0
