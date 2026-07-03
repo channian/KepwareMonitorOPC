@@ -98,7 +98,7 @@ function renderTable() {
     var headerRow = document.getElementById('tagsHeader');
     var hHtml = '<th style="width:40px">操作</th>';
     for (var h = 0; h < tagHeaders.length; h++) {
-        hHtml += '<th>' + tagHeaders[h] + '</th>';
+        hHtml += '<th>' + escapeHtml(tagHeaders[h]) + '</th>';
     }
     headerRow.innerHTML = hHtml;
 
@@ -131,8 +131,8 @@ function renderTable() {
             var val = tagRows[i][col] || '';
             var width = col === 'NodeId' ? 'min-width:280px' : col === 'Name' ? 'min-width:150px' : 'min-width:80px';
             html += '<td><input type="text" class="input input-sm" style="' + width + '"' +
-                     ' value="' + escapeHtml(val) + '" data-row="' + i + '" data-col="' + col + '"' +
-                     ' onchange="updateCell(' + i + ',\'' + col + '\',this.value)"></td>';
+                     ' value="' + escapeHtml(val) + '" data-row="' + i + '" data-col="' + escapeHtml(col) + '"' +
+                     ' onchange="updateCellFromInput(this)"></td>';
         }
         html += '</tr>';
     }
@@ -171,6 +171,10 @@ function onSearch() {
 }
 
 function updateCell(row, col, value) { tagRows[row][col] = value; }
+
+function updateCellFromInput(el) {
+    updateCell(parseInt(el.dataset.row, 10), el.dataset.col, el.value);
+}
 
 function addRow() {
     var newRow = {};

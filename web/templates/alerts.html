@@ -100,13 +100,13 @@ function loadAlerts() {
                 html +=
                     '<tr>' +
                         '<td class="td-mono nowrap">' + r.timestamp + '</td>' +
-                        '<td><span class="pill p-' + (r.alert_type === 'connection' ? 'warn' : 'info') + '"><span class="dot"></span>' + (r.alert_type || '') + '</span></td>' +
-                        '<td class="td-mono">' + (r.server_name || '') + '</td>' +
-                        '<td style="font-weight:600;">' + (r.device_name || '-') + '</td>' +
-                        '<td style="font-size:12px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (r.subject || '') + '</td>' +
-                        '<td class="td-mono">' + (r.diagnostic_level || '-') + '</td>' +
-                        '<td class="td-mono" style="font-size:11px;">' + (r.diagnostic_msg || '-') + '</td>' +
-                        '<td class="td-mono" style="font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + recipients + '</td>' +
+                        '<td><span class="pill p-' + (r.alert_type === 'connection' ? 'warn' : 'info') + '"><span class="dot"></span>' + escapeHtml(r.alert_type || '') + '</span></td>' +
+                        '<td class="td-mono">' + escapeHtml(r.server_name || '') + '</td>' +
+                        '<td style="font-weight:600;">' + escapeHtml(r.device_name || '-') + '</td>' +
+                        '<td style="font-size:12px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(r.subject || '') + '</td>' +
+                        '<td class="td-mono">' + escapeHtml(r.diagnostic_level || '-') + '</td>' +
+                        '<td class="td-mono" style="font-size:11px;">' + escapeHtml(r.diagnostic_msg || '-') + '</td>' +
+                        '<td class="td-mono" style="font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(recipients) + '</td>' +
                         '<td><span class="pill p-' + kind + '"><span class="dot"></span>' + stateText + '</span></td>' +
                     '</tr>';
             }

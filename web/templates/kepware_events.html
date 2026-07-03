@@ -256,14 +256,14 @@ function loadEvents() {
                         '<td class="text-center"><span class="dot-inline ' + dotClass + '"></span></td>' +
                         '<td class="td-mono nowrap" style="font-weight:600;">' + escapeHtml(r.server_name || '-') + '</td>' +
                         '<td class="td-mono nowrap">' + r.timestamp + '</td>' +
-                        '<td><span class="pill ' + sevPillClass(sev) + '"><span class="dot"></span>' + sev + '</span></td>' +
-                        '<td><span class="pill p-' + evClass + '"><span class="dot"></span>' + r.event + '</span></td>' +
+                        '<td><span class="pill ' + sevPillClass(sev) + '"><span class="dot"></span>' + escapeHtml(sev) + '</span></td>' +
+                        '<td><span class="pill p-' + evClass + '"><span class="dot"></span>' + escapeHtml(r.event) + '</span></td>' +
                         '<td class="td-mono">' + escapeHtml(r.source || '') + '</td>' +
                         '<td style="font-weight:600;">' + escapeHtml(r.channel || '-') + '</td>' +
                         '<td>' + escapeHtml(r.device || '-') + '</td>' +
                         '<td class="td-mono" style="font-size:11px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(r.tag_address || '-') + '</td>' +
                         '<td class="td-mono" style="font-size:11px;max-width:350px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(r.message || '') + '</td>' +
-                        '<td>' + (r.alert_type ? '<span class="pill p-err"><span class="dot"></span>' + r.alert_type + '</span>' : '-') + '</td>' +
+                        '<td>' + (r.alert_type ? '<span class="pill p-err"><span class="dot"></span>' + escapeHtml(r.alert_type) + '</span>' : '-') + '</td>' +
                     '</tr>';
             }
             document.getElementById('eventsBody').innerHTML = html;
@@ -309,7 +309,7 @@ function loadTransactions() {
                         '<td class="td-mono nowrap" style="font-weight:600;">' + escapeHtml(r.server_name || '-') + '</td>' +
                         '<td class="td-mono nowrap">' + r.timestamp + '</td>' +
                         '<td style="font-weight:600;">' + escapeHtml(r.user || '') + '</td>' +
-                        '<td><span class="pill ' + actionClass + '"><span class="dot"></span>' + r.action + '</span></td>' +
+                        '<td><span class="pill ' + actionClass + '"><span class="dot"></span>' + escapeHtml(r.action) + '</span></td>' +
                         '<td class="td-mono" style="font-size:11px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(r.endpoint || '') + '</td>' +
                         '<td class="td-mono">' + escapeHtml(r.source_ip || '') + '</td>' +
                         '<td class="td-mono ' + respClass + '">' + r.response + '</td>' +

@@ -105,15 +105,15 @@ function loadHistory() {
                 html +=
                     '<tr style="' + rowStyle + '">' +
                         '<td class="td-mono nowrap">' + r.timestamp + '</td>' +
-                        '<td class="td-mono">' + (r.server_name || '') + '</td>' +
-                        '<td style="font-weight:600;">' + r.device_name + '</td>' +
+                        '<td class="td-mono">' + escapeHtml(r.server_name || '') + '</td>' +
+                        '<td style="font-weight:600;">' + escapeHtml(r.device_name) + '</td>' +
                         '<td class="td-num">' + (r.value != null ? r.value : '-') + '</td>' +
                         '<td class="td-num">' + (r.threshold != null ? r.threshold : '-') + '</td>' +
-                        '<td class="td-mono">' + (r.condition || '-') + '</td>' +
+                        '<td class="td-mono">' + escapeHtml(r.condition || '-') + '</td>' +
                         '<td class="td-mono">' + r.counter + '</td>' +
                         '<td class="text-center">' + dotHtml + '</td>' +
-                        '<td><span class="pill p-' + (r.alert_type ? 'info' : 'muted') + '"><span class="dot"></span>' + (r.alert_type || '-') + '</span></td>' +
-                        '<td class="td-mono" style="font-size:11px;">' + (r.diagnostic || '-') + '</td>' +
+                        '<td><span class="pill p-' + (r.alert_type ? 'info' : 'muted') + '"><span class="dot"></span>' + escapeHtml(r.alert_type || '-') + '</span></td>' +
+                        '<td class="td-mono" style="font-size:11px;">' + escapeHtml(r.diagnostic || '-') + '</td>' +
                     '</tr>';
             }
             document.getElementById('historyBody').innerHTML = html;
