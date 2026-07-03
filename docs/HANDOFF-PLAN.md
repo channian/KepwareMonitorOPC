@@ -70,27 +70,23 @@ Kepware OPC UA 監控告警系統，部署於 Windows 內網環境（測試機 K
 
 ## 3. 已知未解決問題（Backlog，依優先級排序）
 
-### P0 — 影響穩定性，建議優先處理
+### 已完成（2026-07-03，Sonnet 5 三 agent 平行處理）
 
-**P0-1. OPC UA 斷線 watchdog 錯誤（使用者已回報實際發生）**
+- ✅ **P0-1 OPC UA 斷線偵測強化**：新增 `OPCConnection.is_alive()`（`opc_connection.py`），主迴圈讀值前先檢查，斷線可提早感知；新增連續失敗次數追蹤 + 首次/第 5 次告警降噪機制；重連成功寄送復歸通知。詳見 commit `6685698`。**尚待實機驗證**（見下方新增的 P0-3）。
+- ✅ **P1-1 `kepware_backups` 清理**：`db_service.py` `cleanup_old_records()` 已補上。
+- ✅ **P1-2 定期清理排程**：`monitor_manager.py` `_monitor_loop()` 改為每日執行一次，不再只在 `start()` 執行一次。
+- ✅ **P2-1 XSS escape 統一**：`history/alerts/dashboard/kepware_events/tags/users.html` 全數補上 `escapeHtml()`；`users.html`/`tags.html` 的 onclick 屬性注入風險改用 `data-*` 屬性傳值。詳見 commit `cfe657d`。
+- ✅ **P2-4 核心純函式單元測試**：新增 `tests/`，96 個測試全數通過，涵蓋 timestamp 解析、事件嚴重度分類、CSV 解析、`evaluate()` 閾值判斷全部條件分支。詳見 commit `783d315`。
 
-錯誤樣貌：
-```
-Error in watchdog loop
-asyncua.ua.uaerrors._base.UaError: Failed to send request to OPC UA server
-WARNING - Future for request id 63 is already done
-```
+### P0 — 影響穩定性，待實機驗證/決策
 
-現況分析：
-- `opc_connection.py` 的重連邏輯只在 `read_values()` 拋例外時觸發（`monitor_manager.py:767-782`）。
-- asyncua 的 watchdog 在**背景 task** 中失敗時，錯誤只會印在 log，主迴圈要等到下一次讀值失敗才會重連。若 `check_interval` 很長，中間有監控空窗。
-- `Future already done` 是 asyncua 內部 race，屬雜訊可忽略，但代表連線確實斷過。
+**P0-3.（新）`is_alive()` 的 asyncua API 相容性尚未在正式部署環境驗證**
 
-建議處理：
-1. 在 `OPCConnection` 加入連線健康檢查（例如每輪讀值前檢查 `client.uaclient` 狀態，或 catch watchdog 例外主動標記 `self.connected = False`）。
-2. 考慮縮短 asyncua 的 `session_timeout` / `watchdog_intervall`（`Client(url, timeout=...)`，asyncua 參數名為 `watchdog_intervall`）。
-3. 斷線→重連成功應寫入 `alert_log`（目前 `send_connection_alert` 存在於 `monitor_manager.py:613`，確認斷線事件有被完整覆蓋）。
-4. 重連失敗持續 N 次後應升級告警（目前只會無限 30 秒重試）。
+`is_alive()` 依序嘗試 `client.check_connection()` → `client.uaclient.state` → 都沒有則保守回傳 `True`（fail-open，不影響原有行為）。這個相容性寫法已在 sandbox 安裝的 asyncua（`2.0.1`）驗證過可正確運作，但 sandbox 版本可能與你正式機器上安裝的 asyncua 版本不同（`requirements.txt` 只釘了 `asyncua>=1.0.0`，沒有上限）。**建議部署後觀察一段時間的 log，確認 `is_alive()` 有沒有誤判（例如連線正常卻頻繁報斷線）**，若有異常屬於程式判斷邏輯問題，需要回報實際 log 內容才能進一步除錯。
+
+**P0-4.（新，範圍外發現，尚未修正）重連成功後的 `continue` 未真正跳回讀值**
+
+`_monitor_loop()` 裡「讀值失敗 → 重連成功 → `continue`」的註解寫「跳回 while 開頭」，但實際上 `continue` 是在 `for conn_name, conn in self.connections.items()` 迴圈內，只會跳到**下一台** Server，不會立即重試剛重連成功的這台。單台 Server 部署不受影響（迴圈只有一個元素，效果等同跳回 while），但**多台 Server 情境下**，重連成功的那台要等到下一輪整體迴圈（`check_interval` 秒後）才會真正重試讀值，而非「立即重試」（與 log 訊息「立即重試讀取...」的敘述不符）。是否修正、修正到什麼程度，建議先確認你目前是單台還是多台部署再決定優先度。
 
 **P0-2. 實機驗證排程備份 end-to-end**
 
@@ -101,14 +97,6 @@ WARNING - Future for request id 63 is already done
 
 ### P1 — 功能完整性
 
-**P1-1. `kepware_backups` 表未納入清理**
-
-`db_service.cleanup_old_records()`（`db_service.py:796`）清理 5 張表，但沒有 `kepware_backups`。備份紀錄會無限增長。加一段相同 pattern 的 DELETE 即可。
-
-**P1-2. 清理只在啟動時執行一次**
-
-`cleanup_old_records` 只在 `monitor_manager.start()`（line ~720）呼叫一次。服務是長駐的（可能數月不重啟），應改為主迴圈中每日執行一次（建議 pattern：記錄 `last_cleanup_date`，跨日即執行，用 `get_running_loop().run_in_executor` 避免阻塞）。
-
 **P1-3. 每日彙整 marker 寫入順序**
 
 `_check_daily_summary()`（`kepware_log_service.py:300`）為「先寄信、成功後寫 marker」。若寄信成功但寫 marker 前 crash，重啟後會重寄一次日報。
@@ -116,10 +104,6 @@ WARNING - Future for request id 63 is already done
 - 建議維持現狀或改為「先寫 marker + 寄信失敗時刪除 marker」。此項風險低，可與使用者討論後再決定。
 
 ### P2 — 品質與安全（內網環境，風險較低）
-
-**P2-1. 前端 XSS escape 不一致**
-
-`kepware_backups.html`、`tags.html` 有用 `escapeHtml()`，但 `history.html`、`users.html`、`alerts.html` 等直接字串插值（如 `r.device_name`、`u.username`）。資料來源多為受控（CSV/DB），但 Kepware 事件 message 來自外部。建議統一所有 template 的動態插值都過 `escapeHtml()`（該函式已在 `app.js` 全域提供）。
 
 **P2-2. 設定檔密碼明文**
 
@@ -129,31 +113,33 @@ WARNING - Future for request id 63 is already done
 
 `web/auth.py` 的 `SessionManager.secret_key` 有產生但沒用於簽名（cookie 只存隨機 session_id，本身安全）。可移除該參數或實作簽名，屬清理性質。
 
-**P2-4. 無自動化測試**
-
-全案無 unit test。建議至少為純函式加測試：`_normalize_timestamp`、`_classify_severity`、`_parse_channel_device`、`evaluate()`（閾值判斷）、CSV 解析。這些是回歸風險最高的邏輯。
-
 **P2-5. PyInstaller 打包實測**
 
 文件已寫，但打包流程尚未在目標 Windows 機器實測（hidden imports：`uvicorn` 的 loop/protocol 子模組常漏）。首次打包預留除錯時間。
+
+**P2-6.（新，測試過程中發現的邊界行為，非 bug，僅供參考）**
+
+寫單元測試時發現三處既有設計的邊界行為，皆已確認不影響目前實際資料流，暫不需修正：
+- `MonitorManager._parse_csv_row` 的 `Enable` 欄位只認可字串 `"true"`（不分大小寫）為 `True`，其餘（含 `"1"`、`"yes"`）一律視為 `False`；若未來 CSV 維護者誤填 `"1"`/`"yes"` 到 Enable 欄位，設備會被靜默停用而不會報錯。
+- `evaluate()` 對 `condition` 字串比對是大小寫敏感的，但實際資料流一定先經過 `_parse_csv_row`（會 `.lower()`），故無實際影響。
+- `evaluate()` 的 `device_type=="log"` 分支與頂層 `raw_value is None` 檢查對 `None` 輸入的結果剛好一致，不影響行為。
 
 ---
 
 ## 4. 建議執行順序（給接手模型的路線圖）
 
 ```
-第一階段（穩定性）
-  ├─ P0-1 OPC UA 斷線處理強化 ← 使用者已遇到，最優先
+第一階段（穩定性，P0-1/P1-1/P1-2/P2-1/P2-4 已完成，見上方勾選清單）
+  ├─ P0-3 is_alive() 實機觀察（需使用者配合看 log）
+  ├─ P0-4 多台 Server 重連後 continue 語意問題（需先確認部署是單台/多台）
   └─ P0-2 排程備份實機驗證（需使用者配合觀察）
 
 第二階段（維運完整性）
-  ├─ P1-1 kepware_backups 清理（10 分鐘的小改動）
-  ├─ P1-2 定期清理排程
   └─ P1-3 日報 marker（先與使用者確認取捨）
 
 第三階段（品質）
-  ├─ P2-1 XSS escape 統一
-  ├─ P2-4 核心邏輯 unit tests
+  ├─ P2-2 設定檔密碼明文（可選）
+  ├─ P2-3 Session secret_key 清理（可選）
   └─ P2-5 PyInstaller 實測支援
 ```
 
