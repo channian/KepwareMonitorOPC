@@ -819,13 +819,19 @@ class DatabaseService:
                 DELETE FROM kepware_transactions
                 WHERE julianday(?) - julianday(timestamp) > ?
             """
+            sql_kep_backups = """
+                DELETE FROM kepware_backups
+                WHERE julianday(?) - julianday(timestamp) > ?
+            """
             cur1 = conn.execute(sql_history, (cutoff, days))
             cur2 = conn.execute(sql_alerts, (cutoff, days))
             cur3 = conn.execute(sql_webhook, (cutoff, days))
             cur4 = conn.execute(sql_kep_events, (cutoff, days))
             cur5 = conn.execute(sql_kep_tx, (cutoff, days))
+            cur6 = conn.execute(sql_kep_backups, (cutoff, days))
             conn.commit()
-            total = cur1.rowcount + cur2.rowcount + cur3.rowcount + cur4.rowcount + cur5.rowcount
+            total = (cur1.rowcount + cur2.rowcount + cur3.rowcount +
+                     cur4.rowcount + cur5.rowcount + cur6.rowcount)
             if total > 0:
                 logging.info(f"清理舊紀錄: 刪除 {total} 筆 (超過 {days} 天)")
             return total

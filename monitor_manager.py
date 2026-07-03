@@ -19,6 +19,11 @@ def log_and_print(msg):
     logging.info(msg)
 
 
+# 連線層重連失敗告警門檻：連續重連失敗達此次數時，額外發送一次升級告警
+# （避免無限重試期間完全沒有二次提醒，但也不會每 30 秒就寄一封轟炸信箱）
+RECONNECT_ALERT_THRESHOLD = 5
+
+
 class DeviceConfig:
     """單一監控設備的設定與執行狀態"""
 
@@ -122,6 +127,10 @@ class MonitorManager:
 
         # 監控設備清單
         self.devices = []  # list of DeviceConfig
+
+        # 連線層重連失敗次數追蹤（斷線告警降噪與升級用）
+        # key: 連線名稱, value: 連續重連失敗次數（成功後歸零）
+        self.connection_fail_counts = {}
 
         logging.info(f"MonitorManager 設定: 檢查間隔={self.check_interval}s, "
                      f"CSV={self.tags_csv}, Server 數={len(self.connections)}")
@@ -610,9 +619,9 @@ class MonitorManager:
         t = threading.Thread(target=_do_send, daemon=True)
         t.start()
 
-    def send_connection_alert(self, conn_name, diagnostic_result):
+    def send_connection_alert(self, conn_name, diagnostic_result, is_recovery=False):
         """
-        發送連線層派報（Kepware 主機斷線等），通知 IT 基礎人員。
+        發送連線層派報（Kepware 主機斷線 / 恢復），通知 IT 基礎人員。
         使用全域收件人。
         """
         level_labels = {
@@ -620,24 +629,36 @@ class MonitorManager:
             DiagnosticResult.LEVEL_OPC_SERVICE_DOWN: "OPC 服務異常",
         }
         label = level_labels.get(diagnostic_result.level, "連線異常")
-        subject = f"[連線異常] {self.mail_subject} - {conn_name} {label}"
+
+        if is_recovery:
+            status_tag = "[連線復歸]"
+            title_text = "Kepware 連線恢復正常通知"
+            color_hex = "#28a745"
+            msg_context = "連線已恢復正常，若持續穩定可忽略此通知。"
+        else:
+            status_tag = "[連線異常]"
+            title_text = "Kepware 連線異常通知"
+            color_hex = "#dc3545"
+            msg_context = "請 IT 人員儘速確認。"
+
+        subject = f"{status_tag} {self.mail_subject} - {conn_name} {label}"
 
         html_body = f"""
         <html>
         <body>
-            <h2 style="color: #dc3545;">Kepware 連線異常通知</h2>
+            <h2 style="color: {color_hex};">{title_text}</h2>
             <p><strong>通知時間:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
             <p><strong>Server:</strong> {conn_name}</p>
             <p><strong>診斷結果:</strong>
-               <span style="font-size: 1.2em; font-weight: bold; color: #dc3545;">
+               <span style="font-size: 1.2em; font-weight: bold; color: {color_hex};">
                {diagnostic_result.message}</span></p>
             <hr>
-            <p>請 IT 人員儘速確認。</p>
+            <p>{msg_context}</p>
         </body>
         </html>
         """
 
-        log_and_print(f"    >>> 寄送連線異常通知: {subject}")
+        log_and_print(f"    >>> 寄送連線{'復歸' if is_recovery else '異常'}通知: {subject}")
 
         try:
             self.email_service.send_alert_email(
@@ -647,7 +668,7 @@ class MonitorManager:
                 html_body=html_body,
             )
         except Exception as ex:
-            logging.exception(f"連線異常通知寄送失敗: {ex}")
+            logging.exception(f"連線{'復歸' if is_recovery else '異常'}通知寄送失敗: {ex}")
 
         try:
             self.db.write_alert_log(
@@ -659,7 +680,7 @@ class MonitorManager:
                 recipients_to=self.global_mail_to,
                 recipients_cc=self.global_mail_cc,
                 subject=subject,
-                is_recovery=False,
+                is_recovery=is_recovery,
             )
         except Exception as ex:
             logging.warning(f"連線派報紀錄寫入失敗: {ex}")
@@ -676,9 +697,9 @@ class MonitorManager:
                     counter=0,
                     accumulate=0,
                     diagnostic_msg=diagnostic_result.message,
-                    is_recovery=False,
+                    is_recovery=is_recovery,
                 )
-                self._fire_webhook(variables, conn_name, "", False)
+                self._fire_webhook(variables, conn_name, "", is_recovery)
             except Exception as ex:
                 logging.warning(f"連線 Webhook 推播失敗: {ex}")
 
@@ -712,14 +733,7 @@ class MonitorManager:
             log_and_print(f"[{name}] 正在連線到 {conn.url} ...")
             await conn.connect()
 
-        # 清理舊 DB 紀錄
-        if self.kepware_logs:
-            retention = max(kl.retention_days for kl in self.kepware_logs)
-        else:
-            retention = 90
-        self.db.cleanup_old_records(days=retention)
-
-        # 進入主迴圈
+        # 進入主迴圈（DB 舊紀錄清理改為在迴圈中每日執行一次，見 _monitor_loop）
         logging.info("進入主監控迴圈...")
         await self._monitor_loop()
 
@@ -729,6 +743,7 @@ class MonitorManager:
         """
         last_csv_check = 0
         last_kepware_log_poll = {}
+        last_cleanup_date = None  # 每日清理舊紀錄追蹤（服務長駐執行，避免資料庫無限增長）
 
         while True:
             now = time.time()
@@ -765,6 +780,14 @@ class MonitorManager:
                 # 讀值與重連
                 # ==========================================
                 try:
+                    # 讀值前先做一次輕量健康檢查：asyncua 背景 watchdog
+                    # 偵測到斷線時只會印 log，不會讓下一次 read_values()
+                    # 立刻失敗，這裡讓斷線可以提早被主迴圈感知，不用等到
+                    # 真正讀值失敗才觸發重連。
+                    if not await conn.is_alive():
+                        raise ConnectionError(
+                            f"[{conn_name}] 連線健康檢查失敗（背景 watchdog 已偵測到斷線）"
+                        )
                     values = await conn.read_values(
                         [{"nodeid": d.nodeid, "name": d.name} for d in server_devices]
                     )
@@ -775,9 +798,40 @@ class MonitorManager:
                     success = await conn.reconnect()
                     if success:
                         log_and_print(f"[{conn_name}] 重新連線成功！立即重試讀取...")
+                        if self.connection_fail_counts.get(conn_name, 0) > 0:
+                            # 曾經連續失敗過（已寄過斷線告警），寄送復歸通知
+                            try:
+                                diag_result = await conn.diagnose_kepware()
+                            except Exception:
+                                diag_result = DiagnosticResult(
+                                    DiagnosticResult.LEVEL_OK,
+                                    f"[{conn_name}] 已恢復連線",
+                                )
+                            self.send_connection_alert(conn_name, diag_result, is_recovery=True)
+                        self.connection_fail_counts[conn_name] = 0
                         continue  # 跳回 while 開頭
                     else:
-                        log_and_print(f"[{conn_name}] 將等待 30 秒後再次嘗試...")
+                        fail_count = self.connection_fail_counts.get(conn_name, 0) + 1
+                        self.connection_fail_counts[conn_name] = fail_count
+                        log_and_print(f"[{conn_name}] 將等待 30 秒後再次嘗試...(連續失敗 {fail_count} 次)")
+
+                        # 降噪：首次失敗寄送一次告警，之後不再重複，
+                        # 直到連續失敗次數達到升級門檻才再寄一次
+                        if fail_count == 1 or fail_count == RECONNECT_ALERT_THRESHOLD:
+                            try:
+                                diag_result = await conn.diagnose_kepware()
+                            except Exception:
+                                diag_result = DiagnosticResult(
+                                    DiagnosticResult.LEVEL_HOST_DOWN,
+                                    f"[{conn_name}] 連線異常: {ex}",
+                                )
+                            if fail_count == RECONNECT_ALERT_THRESHOLD:
+                                diag_result.message = (
+                                    f"{diag_result.message}"
+                                    f"（已連續重連失敗 {fail_count} 次，請儘速確認）"
+                                )
+                            self.send_connection_alert(conn_name, diag_result)
+
                         await asyncio.sleep(30)
                         continue
 
@@ -812,6 +866,22 @@ class MonitorManager:
                         )
                     except Exception as ex:
                         logging.error(f"Kepware Backup[{kl.server_name}] 檢查錯誤: {ex}")
+
+            # 每日清理舊 DB 紀錄（服務長駐執行，可能數月不重啟，
+            # 不能只在 start() 執行一次，否則資料會無限增長）
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            if today_str != last_cleanup_date:
+                if self.kepware_logs:
+                    retention = max(kl.retention_days for kl in self.kepware_logs)
+                else:
+                    retention = 90
+                try:
+                    await asyncio.get_running_loop().run_in_executor(
+                        None, self.db.cleanup_old_records, retention
+                    )
+                except Exception as ex:
+                    logging.error(f"每日清理舊紀錄失敗: {ex}")
+                last_cleanup_date = today_str
 
             # 等待下一輪
             log_and_print(f"等待 {self.check_interval} 秒後更新...")

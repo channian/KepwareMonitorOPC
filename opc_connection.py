@@ -131,6 +131,38 @@ class OPCConnection:
 
         return values
 
+    async def is_alive(self):
+        """
+        輕量連線健康檢查。
+
+        asyncua 的背景 watchdog task 偵測到連線異常時只會印 log（"Error in
+        watchdog loop"），不會讓下一次 read_values() 立刻失敗，主迴圈要等到
+        下一輪真正讀值失敗才會發現斷線，中間會有監控空窗。這裡在每輪讀值前
+        先做一次便宜的狀態檢查，讓斷線可以更快被主迴圈感知。
+
+        舊版 asyncua（約 1.x）提供 client.check_connection()，若背景 task
+        已掛掉會在這裡重新拋出例外；新版（2.x）改用 client.uaclient.state
+        表示連線狀態。兩種 API 都嘗試相容，其他情況一律視為存活，交由
+        read_values() 的例外處理去判斷。
+        """
+        if not self.connected:
+            return False
+        try:
+            check_fn = getattr(self.client, "check_connection", None)
+            if check_fn is not None:
+                await check_fn()
+                return True
+
+            state = getattr(getattr(self.client, "uaclient", None), "state", None)
+            if state is not None:
+                return getattr(state, "value", state) == "connected"
+
+            return True
+        except Exception as ex:
+            logging.warning(f"[{self.name}] 連線健康檢查偵測到異常: {ex}")
+            self.connected = False
+            return False
+
     async def diagnose_kepware(self):
         """執行 Kepware 主機層診斷 (Layer 1 + 2)"""
         return await self.diagnostic.diagnose_kepware_host(
