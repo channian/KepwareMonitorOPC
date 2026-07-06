@@ -809,7 +809,19 @@ class MonitorManager:
                                 )
                             self.send_connection_alert(conn_name, diag_result, is_recovery=True)
                         self.connection_fail_counts[conn_name] = 0
-                        continue  # 跳回 while 開頭
+
+                        # 立即重試讀值（原本這裡的 continue 只會跳到 for 迴圈
+                        # 的下一台 Server，多台部署時剛重連成功的這台要等到
+                        # 下一輪整體迴圈才會真正重試，與上面的 log 訊息不符）
+                        try:
+                            values = await conn.read_values(
+                                [{"nodeid": d.nodeid, "name": d.name} for d in server_devices]
+                            )
+                        except Exception as ex2:
+                            log_and_print(f"[{conn_name}] 重連後立即重試讀取仍失敗: {ex2}，"
+                                          f"將於下一輪重試")
+                            continue
+                        # 不 continue，直接往下走到「數據處理與警報」區塊
                     else:
                         fail_count = self.connection_fail_counts.get(conn_name, 0) + 1
                         self.connection_fail_counts[conn_name] = fail_count

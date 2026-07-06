@@ -11,13 +11,11 @@ class SessionManager:
     Cookie-based session 管理（記憶體儲存，適用單機部署）。
     """
 
-    def __init__(self, secret_key=None, session_timeout=28800):
+    def __init__(self, session_timeout=28800):
         """
         Args:
-            secret_key: Cookie 簽名金鑰
             session_timeout: Session 過期時間（秒），預設 8 小時
         """
-        self.secret_key = secret_key or secrets.token_hex(32)
         self.session_timeout = session_timeout
         self._sessions = {}  # session_id -> {user_id, username, role, display_name, created_at}
 

@@ -506,3 +506,19 @@ C:\Services\KepwareMonitor\
 ```
 
 > **注意：** 方式 B 不需要 `venv\`、`web\`、`*.py` 等原始碼，PyInstaller 已將所有 Python 程式碼和靜態資源打包進 `KepwareMonitor.exe`。
+
+## 設定檔安全性
+
+`Config\settings.ini` 內含 OPC UA、Kepware API Gateway、SMTP 帳號密碼，皆為**明文儲存**（無加密）。部署時請務必限制此檔案的存取權限：
+
+1. 用檔案總管右鍵點選 `Config\` 資料夾 → **內容** → **安全性** 頁籤
+2. 移除 `Users`（一般使用者群組）的讀取權限，僅保留：
+   - 執行此服務的帳號（例如 `NT AUTHORITY\SYSTEM` 或指定的服務帳號）
+   - 本機系統管理員（`Administrators`）
+3. 或用 PowerShell 一次設定（以系統管理員身分執行）：
+   ```powershell
+   icacls "C:\Services\KepwareMonitor\Config" /inheritance:r
+   icacls "C:\Services\KepwareMonitor\Config" /grant:r "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F"
+   ```
+
+此外，`data\monitor.db` 內含歷史監控資料與使用者帳號（密碼已雜湊），`logs\` 目錄可能記錄部分診斷資訊，建議一併套用相同的存取權限限制。
