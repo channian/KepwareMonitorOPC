@@ -78,15 +78,17 @@ Kepware OPC UA 監控告警系統，部署於 Windows 內網環境（測試機 K
 - ✅ **P2-1 XSS escape 統一**：`history/alerts/dashboard/kepware_events/tags/users.html` 全數補上 `escapeHtml()`；`users.html`/`tags.html` 的 onclick 屬性注入風險改用 `data-*` 屬性傳值。詳見 commit `cfe657d`。
 - ✅ **P2-4 核心純函式單元測試**：新增 `tests/`，96 個測試全數通過，涵蓋 timestamp 解析、事件嚴重度分類、CSV 解析、`evaluate()` 閾值判斷全部條件分支。詳見 commit `783d315`。
 
-### P0 — 影響穩定性，待實機驗證/決策
+### 已完成（2026-07-06，Sonnet 5 後續處理）
+
+- ✅ **P0-4 重連成功後立即重試讀值**：原本 `continue` 只會跳到 for 迴圈下一台 Server，多台部署時要等下一輪整體週期才真正重試。改為重連成功後立即對該連線重試一次 `read_values()`，成功則直接沿用既有流程往下處理數據。單台部署行為不受影響。詳見 commit `69825b4`。
+- ✅ **P2-3 移除未使用的 `secret_key`**：`web/auth.py` 的 `SessionManager.secret_key` 從未被用於簽名、也從未被呼叫端傳入，純屬死碼，已移除參數。
+- ✅ **P2-2 設定檔權限文件化**：`docs/deployment-iis.md` 新增「設定檔安全性」章節，說明 `icacls` 限制 `Config/data/logs` 存取權限的做法（明文密碼未做加密，改用 DPAPI 等方案風險/複雜度較高，故採檔案權限限制作為務實方案）。
+
+### P0 — 待實機驗證
 
 **P0-3.（新）`is_alive()` 的 asyncua API 相容性尚未在正式部署環境驗證**
 
 `is_alive()` 依序嘗試 `client.check_connection()` → `client.uaclient.state` → 都沒有則保守回傳 `True`（fail-open，不影響原有行為）。這個相容性寫法已在 sandbox 安裝的 asyncua（`2.0.1`）驗證過可正確運作，但 sandbox 版本可能與你正式機器上安裝的 asyncua 版本不同（`requirements.txt` 只釘了 `asyncua>=1.0.0`，沒有上限）。**建議部署後觀察一段時間的 log，確認 `is_alive()` 有沒有誤判（例如連線正常卻頻繁報斷線）**，若有異常屬於程式判斷邏輯問題，需要回報實際 log 內容才能進一步除錯。
-
-**P0-4.（新，範圍外發現，尚未修正）重連成功後的 `continue` 未真正跳回讀值**
-
-`_monitor_loop()` 裡「讀值失敗 → 重連成功 → `continue`」的註解寫「跳回 while 開頭」，但實際上 `continue` 是在 `for conn_name, conn in self.connections.items()` 迴圈內，只會跳到**下一台** Server，不會立即重試剛重連成功的這台。單台 Server 部署不受影響（迴圈只有一個元素，效果等同跳回 while），但**多台 Server 情境下**，重連成功的那台要等到下一輪整體迴圈（`check_interval` 秒後）才會真正重試讀值，而非「立即重試」（與 log 訊息「立即重試讀取...」的敘述不符）。是否修正、修正到什麼程度，建議先確認你目前是單台還是多台部署再決定優先度。
 
 **P0-2. 實機驗證排程備份 end-to-end**
 
@@ -105,14 +107,6 @@ Kepware OPC UA 監控告警系統，部署於 Windows 內網環境（測試機 K
 
 ### P2 — 品質與安全（內網環境，風險較低）
 
-**P2-2. 設定檔密碼明文**
-
-`settings.ini` 中 OPC UA / Gateway / SMTP 密碼皆明文。內網單機可接受，但可考慮 Windows DPAPI 或至少檔案權限說明文件化。
-
-**P2-3. Session secret_key 未實際使用**
-
-`web/auth.py` 的 `SessionManager.secret_key` 有產生但沒用於簽名（cookie 只存隨機 session_id，本身安全）。可移除該參數或實作簽名，屬清理性質。
-
 **P2-5. PyInstaller 打包實測**
 
 文件已寫，但打包流程尚未在目標 Windows 機器實測（hidden imports：`uvicorn` 的 loop/protocol 子模組常漏）。首次打包預留除錯時間。
@@ -129,18 +123,15 @@ Kepware OPC UA 監控告警系統，部署於 Windows 內網環境（測試機 K
 ## 4. 建議執行順序（給接手模型的路線圖）
 
 ```
-第一階段（穩定性，P0-1/P1-1/P1-2/P2-1/P2-4 已完成，見上方勾選清單）
+第一階段（穩定性，P0-1/P0-4/P1-1/P1-2/P2-1/P2-2/P2-3/P2-4 已完成，見上方勾選清單）
   ├─ P0-3 is_alive() 實機觀察（需使用者配合看 log）
-  ├─ P0-4 多台 Server 重連後 continue 語意問題（需先確認部署是單台/多台）
   └─ P0-2 排程備份實機驗證（需使用者配合觀察）
 
 第二階段（維運完整性）
-  └─ P1-3 日報 marker（先與使用者確認取捨）
+  └─ P1-3 日報 marker（需與使用者確認取捨後才動手）
 
 第三階段（品質）
-  ├─ P2-2 設定檔密碼明文（可選）
-  ├─ P2-3 Session secret_key 清理（可選）
-  └─ P2-5 PyInstaller 實測支援
+  └─ P2-5 PyInstaller 實測支援（需使用者配合在目標機器打包）
 ```
 
 ---
