@@ -132,6 +132,9 @@ class MonitorManager:
         # key: 連線名稱, value: 連續重連失敗次數（成功後歸零）
         self.connection_fail_counts = {}
 
+        # 記錄哪些連線已經警告過「缺少 is_alive() 方法」，避免每輪重複洗版
+        self._is_alive_missing_warned = set()
+
         logging.info(f"MonitorManager 設定: 檢查間隔={self.check_interval}s, "
                      f"CSV={self.tags_csv}, Server 數={len(self.connections)}")
 
@@ -784,7 +787,23 @@ class MonitorManager:
                     # 偵測到斷線時只會印 log，不會讓下一次 read_values()
                     # 立刻失敗，這裡讓斷線可以提早被主迴圈感知，不用等到
                     # 真正讀值失敗才觸發重連。
-                    if not await conn.is_alive():
+                    #
+                    # is_alive() 若不存在（例如部署時漏更新 opc_connection.py，
+                    # 舊版 OPCConnection 沒有這個方法）不能直接讓 AttributeError
+                    # 被下面的 except 當成「連線斷掉」處理——那樣會導致每一輪
+                    # 都誤判斷線、觸發不必要的重連，反而比沒有健康檢查更不穩定。
+                    # 只在每個連線第一次遇到時警告一次，之後靜默略過健康檢查，
+                    # 行為等同退回舊版（只靠 read_values() 例外判斷斷線）。
+                    is_alive_fn = getattr(conn, "is_alive", None)
+                    if is_alive_fn is None:
+                        if conn_name not in self._is_alive_missing_warned:
+                            logging.warning(
+                                f"[{conn_name}] OPCConnection 缺少 is_alive() 方法"
+                                f"（部署檔案可能未同步更新 opc_connection.py），"
+                                f"本次執行將略過連線健康檢查，僅依讀值例外判斷斷線"
+                            )
+                            self._is_alive_missing_warned.add(conn_name)
+                    elif not await is_alive_fn():
                         raise ConnectionError(
                             f"[{conn_name}] 連線健康檢查失敗（背景 watchdog 已偵測到斷線）"
                         )
