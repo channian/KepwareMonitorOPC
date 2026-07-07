@@ -23,6 +23,14 @@ def log_and_print(msg):
 # （避免無限重試期間完全沒有二次提醒，但也不會每 30 秒就寄一封轟炸信箱）
 RECONNECT_ALERT_THRESHOLD = 5
 
+# 單次讀值失敗後，在同一輪迴圈內短間隔連續重試重連的次數與間隔。
+# 原本重連只試一次，失敗就要等到下一個完整 check_interval（可能長達
+# 數分鐘甚至十分鐘）才有機會再試，中間空窗期實際上比舊版「靠下一輪
+# read_values() 自然重試」還長。改為短間隔連續重試數次，仍失敗才真正
+# 放棄、留給下一輪。
+RECONNECT_RETRY_ATTEMPTS = 3
+RECONNECT_RETRY_DELAY = 20  # 秒
+
 
 class DeviceConfig:
     """單一監控設備的設定與執行狀態"""
@@ -813,8 +821,18 @@ class MonitorManager:
                 except Exception as ex:
                     log_and_print(f"[{conn_name}] 讀取失敗或連線斷掉: {ex}")
 
-                    # --- 舊版自動重連邏輯 ---
-                    success = await conn.reconnect()
+                    # --- 重連邏輯：短間隔連續重試數次，避免只試一次就要
+                    # 等到下一個完整 check_interval 才有機會再試 ---
+                    success = False
+                    for attempt in range(1, RECONNECT_RETRY_ATTEMPTS + 1):
+                        success = await conn.reconnect()
+                        if success:
+                            break
+                        if attempt < RECONNECT_RETRY_ATTEMPTS:
+                            log_and_print(f"[{conn_name}] 第 {attempt}/{RECONNECT_RETRY_ATTEMPTS} "
+                                          f"次重連失敗，{RECONNECT_RETRY_DELAY} 秒後再試...")
+                            await asyncio.sleep(RECONNECT_RETRY_DELAY)
+
                     if success:
                         log_and_print(f"[{conn_name}] 重新連線成功！立即重試讀取...")
                         if self.connection_fail_counts.get(conn_name, 0) > 0:
@@ -844,7 +862,9 @@ class MonitorManager:
                     else:
                         fail_count = self.connection_fail_counts.get(conn_name, 0) + 1
                         self.connection_fail_counts[conn_name] = fail_count
-                        log_and_print(f"[{conn_name}] 將等待 30 秒後再次嘗試...(連續失敗 {fail_count} 次)")
+                        log_and_print(f"[{conn_name}] 連續重試 {RECONNECT_RETRY_ATTEMPTS} 次仍無法"
+                                      f"重新連線，將留待下一輪 ({self.check_interval} 秒後) 再試..."
+                                      f"(連續失敗週期 {fail_count} 次)")
 
                         # 降噪：首次失敗寄送一次告警，之後不再重複，
                         # 直到連續失敗次數達到升級門檻才再寄一次
@@ -863,7 +883,6 @@ class MonitorManager:
                                 )
                             self.send_connection_alert(conn_name, diag_result)
 
-                        await asyncio.sleep(30)
                         continue
 
                 # ==========================================
