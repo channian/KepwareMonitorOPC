@@ -72,7 +72,7 @@ Kepware OPC UA 監控告警系統，部署於 Windows 內網環境（測試機 K
 
 ### 已完成（2026-07-03，Sonnet 5 三 agent 平行處理）
 
-- ✅ **P0-1 OPC UA 斷線偵測強化**：新增 `OPCConnection.is_alive()`（`opc_connection.py`），主迴圈讀值前先檢查，斷線可提早感知；新增連續失敗次數追蹤 + 首次/第 5 次告警降噪機制；重連成功寄送復歸通知。詳見 commit `6685698`。**尚待實機驗證**（見下方新增的 P0-3）。
+- ✅ **P0-1 OPC UA 斷線偵測強化**：新增 `OPCConnection.is_alive()`（`opc_connection.py`），主迴圈讀值前先檢查，斷線可提早感知；新增連續失敗次數追蹤 + 首次/第 5 次告警降噪機制；重連成功寄送復歸通知。詳見 commit `6685698`。**已實機驗證**，過程詳見下方「2026-07-07 實機事故排查」。
 - ✅ **P1-1 `kepware_backups` 清理**：`db_service.py` `cleanup_old_records()` 已補上。
 - ✅ **P1-2 定期清理排程**：`monitor_manager.py` `_monitor_loop()` 改為每日執行一次，不再只在 `start()` 執行一次。
 - ✅ **P2-1 XSS escape 統一**：`history/alerts/dashboard/kepware_events/tags/users.html` 全數補上 `escapeHtml()`；`users.html`/`tags.html` 的 onclick 屬性注入風險改用 `data-*` 屬性傳值。詳見 commit `cfe657d`。
@@ -84,11 +84,19 @@ Kepware OPC UA 監控告警系統，部署於 Windows 內網環境（測試機 K
 - ✅ **P2-3 移除未使用的 `secret_key`**：`web/auth.py` 的 `SessionManager.secret_key` 從未被用於簽名、也從未被呼叫端傳入，純屬死碼，已移除參數。
 - ✅ **P2-2 設定檔權限文件化**：`docs/deployment-iis.md` 新增「設定檔安全性」章節，說明 `icacls` 限制 `Config/data/logs` 存取權限的做法（明文密碼未做加密，改用 DPAPI 等方案風險/複雜度較高，故採檔案權限限制作為務實方案）。
 
+### 已完成（2026-07-07，實機事故排查後修正）
+
+使用者實機部署後回報：手動複製檔案時漏了 `opc_connection.py`，導致 `monitor_manager.py` 呼叫不存在的 `is_alive()` 拋出 `AttributeError`，被誤判為每輪都斷線，比修復前更不穩定。已定位並修正：
+
+- ✅ **`is_alive()` 缺失防護**：改用 `getattr` 取得方法，缺失時只警告一次（每連線一次，不洗版）並略過健康檢查，不再讓 `AttributeError` 被誤判為斷線。詳見 commit `8abf89a`。
+- ✅ **P0-3 已驗證，非誤判**：使用者補齊檔案後仍觀察到斷線變多、派報變多，提供完整 log 逐行核對後確認：
+  1. 派報變多是**預期行為**——`send_connection_alert()` 先前從未被呼叫過（P0-1 修復前的既有 bug），現在接上了，過去真實發生的斷線本來就沒告警過，不代表連線變差。
+  2. 斷線變多的根因**不是 `is_alive()` 誤判**。Log 逐段核對顯示：原始斷線是 `read_values()` 本身失敗（`Failed to send request to OPC UA server`），緊接著的重連流程 `create_session` 也在同一段真實傳輸層異常期間失敗；`is_alive()` 在 10 分鐘後的下一輪才出現，只是如實回報「這段期間 `self.connected` 從未被救回來」，並非額外造成斷線的來源。
+- ✅ **重連改為短間隔連續重試**（真正的根因修正）：原本重連只試一次，失敗後 `sleep 30` 秒但完全沒換到任何重試機會，要等下一個完整 `check_interval`（可能長達十分鐘）才會再試——比舊版單純依賴下一輪 `read_values()` 自然重試的空窗期還長。改為讀值失敗後在同一輪迴圈內以 20 秒間隔連續重試重連最多 3 次，仍失敗才真正放棄、留給下一輪。詳見 commit `dabc648`。
+
+**後續模型注意**：`RECONNECT_RETRY_ATTEMPTS`（3）與 `RECONNECT_RETRY_DELAY`（20 秒）目前是寫死的常數，若使用者回報這個次數/間隔仍不夠或太頻繁，可調整這兩個常數，不需要重新設計架構。
+
 ### P0 — 待實機驗證
-
-**P0-3.（新）`is_alive()` 的 asyncua API 相容性尚未在正式部署環境驗證**
-
-`is_alive()` 依序嘗試 `client.check_connection()` → `client.uaclient.state` → 都沒有則保守回傳 `True`（fail-open，不影響原有行為）。這個相容性寫法已在 sandbox 安裝的 asyncua（`2.0.1`）驗證過可正確運作，但 sandbox 版本可能與你正式機器上安裝的 asyncua 版本不同（`requirements.txt` 只釘了 `asyncua>=1.0.0`，沒有上限）。**建議部署後觀察一段時間的 log，確認 `is_alive()` 有沒有誤判（例如連線正常卻頻繁報斷線）**，若有異常屬於程式判斷邏輯問題，需要回報實際 log 內容才能進一步除錯。
 
 **P0-2. 實機驗證排程備份 end-to-end**
 
@@ -122,7 +130,6 @@ Kepware OPC UA 監控告警系統，部署於 Windows 內網環境（測試機 K
 
 ```
 第一階段（穩定性，P0-1/P0-4/P1-1/P1-2/P2-1/P2-2/P2-3/P2-4 已完成，見上方勾選清單）
-  ├─ P0-3 is_alive() 實機觀察（需使用者配合看 log）
   └─ P0-2 排程備份實機驗證（需使用者配合觀察）
 
 第二階段（品質）
