@@ -299,7 +299,7 @@ async def api_history(request: Request,
         start_date=start_date or None,
         end_date=end_date or None,
         device_name=device_name or None,
-        limit=min(limit, 5000),
+        limit=max(1, min(limit, 5000)),
     )
     return JSONResponse({"data": rows})
 
@@ -358,7 +358,7 @@ async def api_alerts(request: Request,
     rows = db_service.query_alerts(
         start_date=start_date or None,
         end_date=end_date or None,
-        limit=min(limit, 2000),
+        limit=max(1, min(limit, 2000)),
     )
     return JSONResponse({"data": rows})
 
