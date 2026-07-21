@@ -159,7 +159,7 @@ class KepwareLogService:
             message = ev.get("message", "")
             event_type = ev.get("event", "")
 
-            dedup_hash = self._make_hash(raw_ts, source, message)
+            dedup_hash = self._make_hash(self.server_name, raw_ts, source, message)
             ts = self._normalize_timestamp(raw_ts)
             if self.db.kepware_event_exists(dedup_hash):
                 continue
@@ -197,7 +197,8 @@ class KepwareLogService:
             source_ip = tx.get("source", "")
             response = tx.get("response", 0)
 
-            if self.db.kepware_transaction_exists(ts, user, action, endpoint):
+            if self.db.kepware_transaction_exists(ts, user, action, endpoint,
+                                                  self.server_name):
                 continue
 
             is_alert = action == "DELETE"
@@ -221,8 +222,8 @@ class KepwareLogService:
     # ===========================================
 
     @staticmethod
-    def _make_hash(timestamp, source, message):
-        raw = f"{timestamp}|{source}|{message}"
+    def _make_hash(server_name, timestamp, source, message):
+        raw = f"{server_name}|{timestamp}|{source}|{message}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
     _TS_FORMATS = [

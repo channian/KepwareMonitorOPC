@@ -226,22 +226,35 @@ class TestParseTagAddress:
 
 class TestMakeHash:
     def test_same_input_same_hash(self):
-        h1 = KepwareLogService._make_hash("2026-07-03 10:15:30", "Channel1.Device1",
-                                          "Device not responding")
-        h2 = KepwareLogService._make_hash("2026-07-03 10:15:30", "Channel1.Device1",
-                                          "Device not responding")
+        h1 = KepwareLogService._make_hash("ServerA", "2026-07-03 10:15:30",
+                                          "Channel1.Device1", "Device not responding")
+        h2 = KepwareLogService._make_hash("ServerA", "2026-07-03 10:15:30",
+                                          "Channel1.Device1", "Device not responding")
         assert h1 == h2
 
     def test_different_message_different_hash(self):
-        h1 = KepwareLogService._make_hash("2026-07-03 10:15:30", "Channel1.Device1", "訊息A")
-        h2 = KepwareLogService._make_hash("2026-07-03 10:15:30", "Channel1.Device1", "訊息B")
+        h1 = KepwareLogService._make_hash("ServerA", "2026-07-03 10:15:30",
+                                          "Channel1.Device1", "訊息A")
+        h2 = KepwareLogService._make_hash("ServerA", "2026-07-03 10:15:30",
+                                          "Channel1.Device1", "訊息B")
         assert h1 != h2
 
     def test_different_timestamp_different_hash(self):
-        h1 = KepwareLogService._make_hash("2026-07-03 10:15:30", "Channel1.Device1", "訊息A")
-        h2 = KepwareLogService._make_hash("2026-07-03 10:15:31", "Channel1.Device1", "訊息A")
+        h1 = KepwareLogService._make_hash("ServerA", "2026-07-03 10:15:30",
+                                          "Channel1.Device1", "訊息A")
+        h2 = KepwareLogService._make_hash("ServerA", "2026-07-03 10:15:31",
+                                          "Channel1.Device1", "訊息A")
+        assert h1 != h2
+
+    def test_different_server_different_hash(self):
+        # 多台 Server 送出 timestamp/source/message 完全相同的事件，
+        # 必須算出不同 hash，才不會被跨機誤判成重複而靜默丟棄。
+        h1 = KepwareLogService._make_hash("ServerA", "2026-07-03 10:15:30",
+                                          "Channel1.Device1", "Device not responding")
+        h2 = KepwareLogService._make_hash("ServerB", "2026-07-03 10:15:30",
+                                          "Channel1.Device1", "Device not responding")
         assert h1 != h2
 
     def test_hash_length_is_16(self):
-        h = KepwareLogService._make_hash("ts", "src", "msg")
+        h = KepwareLogService._make_hash("srv", "ts", "src", "msg")
         assert len(h) == 16

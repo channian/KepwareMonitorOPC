@@ -148,10 +148,6 @@ class DatabaseService:
                     ON kepware_transactions(timestamp);
                 CREATE INDEX IF NOT EXISTS idx_history_server
                     ON monitor_history(server_name);
-                CREATE INDEX IF NOT EXISTS idx_kep_event_server
-                    ON kepware_events(server_name);
-                CREATE INDEX IF NOT EXISTS idx_kep_tx_server
-                    ON kepware_transactions(server_name);
                 CREATE INDEX IF NOT EXISTS idx_kep_tx_dedup
                     ON kepware_transactions(timestamp, user, action, endpoint);
                 CREATE INDEX IF NOT EXISTS idx_backup_server
@@ -160,6 +156,19 @@ class DatabaseService:
             conn.commit()
 
             self._migrate_kepware_columns(conn)
+
+            # 這兩個索引依賴 migration 補上的 server_name 欄位，
+            # 必須在 _migrate_kepware_columns 之後才能建立，
+            # 否則舊 DB 升級路徑會 no such column: server_name。
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_kep_event_server "
+                "ON kepware_events(server_name)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_kep_tx_server "
+                "ON kepware_transactions(server_name)"
+            )
+            conn.commit()
 
             # 建立預設 admin 帳號（若不存在）
             self._ensure_default_admin(conn)
@@ -557,13 +566,15 @@ class DatabaseService:
     # Kepware Transactions
     # ===========================================
 
-    def kepware_transaction_exists(self, timestamp, user, action, endpoint):
+    def kepware_transaction_exists(self, timestamp, user, action, endpoint,
+                                   server_name=None):
         conn = self._get_conn()
         try:
             row = conn.execute(
                 """SELECT 1 FROM kepware_transactions
-                   WHERE timestamp = ? AND user = ? AND action = ? AND endpoint = ?""",
-                (timestamp, user, action, endpoint),
+                   WHERE timestamp = ? AND user = ? AND action = ? AND endpoint = ?
+                   AND server_name IS ?""",
+                (timestamp, user, action, endpoint, server_name),
             ).fetchone()
             return row is not None
         finally:
