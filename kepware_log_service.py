@@ -313,6 +313,65 @@ class KepwareLogService:
             logging.error(f"KepwareLogService[{self.server_name}] "
                           f"每日彙整失敗: {ex}")
 
+    # 每日彙整信件的深色主題色票（沿用另一專案 HVM 樣式語言，改為純 inline
+    # style 寫法——企業 Outlook/webmail 環境常會整段砍掉 <head>/<style>，
+    # 只有 inline style 屬性能保證版面不跑掉，這點與本檔案其他信件一致）
+    _DAILY_BG = "#0f172a"
+    _DAILY_CARD_BG = "#172033"
+    _DAILY_BORDER = "#1e293b"
+    _DAILY_TEXT = "#e2e8f0"
+    _DAILY_MUTED = "#94a3b8"
+    _DAILY_MUTED2 = "#64748b"
+    _DAILY_MUTED3 = "#475569"
+    _DAILY_FOOTER_TEXT = "#334155"
+
+    def _daily_summary_header(self, accent, date_str):
+        return f"""
+  <div style="background:{self._DAILY_BG};border-bottom:2px solid {accent};padding:20px 24px;border-radius:8px 8px 0 0;">
+    <table style="width:100%;border-collapse:collapse;">
+      <tr>
+        <td style="width:44px;">
+          <div style="background:{self._DAILY_CARD_BG};border:1.5px solid {accent};border-radius:8px;
+                      width:40px;height:40px;text-align:center;line-height:40px;
+                      font-weight:800;font-size:12px;color:#e6edf7;">KEP</div>
+        </td>
+        <td style="padding-left:12px;">
+          <div style="color:#e6edf7;font-size:15px;font-weight:700;">Kepware Monitor</div>
+          <div style="color:{accent};font-size:10px;font-family:monospace;
+                      letter-spacing:0.1em;text-transform:uppercase;">
+            Daily Event Report · {self.server_name}</div>
+        </td>
+      </tr>
+    </table>
+    <div style="color:{self._DAILY_MUTED3};font-size:12px;font-family:monospace;margin-top:8px;">
+      報告日期：{date_str}</div>
+  </div>"""
+
+    def _daily_summary_banner(self, accent, banner_bg, icon, headline, sub_desc):
+        return f"""
+    <table style="width:100%;border-collapse:collapse;background:{banner_bg};
+                  border-left:4px solid {accent};border-radius:8px;margin-bottom:20px;">
+      <tr>
+        <td style="width:32px;padding:14px 0 14px 16px;font-size:20px;vertical-align:top;">{icon}</td>
+        <td style="padding:14px 16px 14px 8px;">
+          <div style="font-size:16px;font-weight:700;color:{self._DAILY_TEXT};margin-bottom:4px;">{headline}</div>
+          <div style="font-size:13px;color:{self._DAILY_MUTED};line-height:1.6;">{sub_desc}</div>
+        </td>
+      </tr>
+    </table>"""
+
+    def _daily_summary_footer(self):
+        return f"""
+  <div style="text-align:center;color:{self._DAILY_FOOTER_TEXT};font-size:11px;
+              font-family:monospace;margin-top:20px;padding-top:16px;
+              border-top:1px solid {self._DAILY_BORDER};">
+    Kepware Monitor · 自動產生，請勿直接回覆<br>
+    此為每日自動彙整報告，詳細紀錄請至 Web UI 查詢</div>"""
+
+    def _daily_summary_section_title(self, text):
+        return (f'<div style="font-size:11px;font-weight:600;text-transform:uppercase;'
+                f'letter-spacing:0.1em;color:{self._DAILY_MUTED2};margin:20px 0 8px;">{text}</div>')
+
     def _send_daily_summary(self, date_str):
         summary = self.db.get_daily_event_summary(date_str, self.server_name)
         today = summary["today_total"]
@@ -320,17 +379,18 @@ class KepwareLogService:
         subject = f"[日報] {self.mail_subject} - [{self.server_name}] {date_str}"
 
         if today == 0:
-            html_body = f"""<html><body style="font-family:Arial,sans-serif;color:#333;margin:0;padding:0;">
-<div style="max-width:700px;margin:20px auto;">
-  <div style="padding:12px 20px;background:#f0fdf4;border-left:5px solid #22c55e;margin-bottom:16px;">
-    <span style="font-size:16px;font-weight:bold;color:#16a34a;">
-      Kepware 事件日報 — {self.server_name}</span>
-    <span style="float:right;color:#666;">{date_str}</span>
+            accent = "#22c55e"
+            html_body = f"""<html><body style="margin:0;padding:0;background:{self._DAILY_BG};
+    font-family:'Microsoft JhengHei',Arial,sans-serif;">
+<div style="max-width:640px;margin:0 auto;padding:24px 16px;">
+{self._daily_summary_header(accent, date_str)}
+  <div style="background:{self._DAILY_BG};padding:24px;border-radius:0 0 8px 8px;
+              border:1px solid {self._DAILY_BORDER};border-top:none;">
+{self._daily_summary_banner(accent, "rgba(34,197,94,0.08)", "🟢",
+                            "今日無異常事件",
+                            "系統運作正常，過去 24 小時內未偵測到任何 Warning / Critical 等級事件。")}
   </div>
-  <p style="font-size:15px;padding:8px 12px;">今日無異常事件，系統運作正常。</p>
-  <hr style="border:none;border-top:1px solid #e0e0e0;margin:20px 0;">
-  <p style="font-size:12px;color:#999;">
-    此為每日自動彙整報告，詳細紀錄請至 Web UI 查詢。</p>
+{self._daily_summary_footer()}
 </div>
 </body></html>"""
             self._do_send_alert(subject, html_body, "kepware_daily_summary",
@@ -345,16 +405,27 @@ class KepwareLogService:
         if avg > 0:
             pct = ((today - avg) / avg) * 100
             if pct > 0:
-                trend = f"↑ {pct:.0f}% (7日均值 {avg:.0f})"
+                trend = f"↑ {pct:.0f}%（7日均值 {avg:.0f}）"
             elif pct < 0:
-                trend = f"↓ {abs(pct):.0f}% (7日均值 {avg:.0f})"
+                trend = f"↓ {abs(pct):.0f}%（7日均值 {avg:.0f}）"
             else:
-                trend = f"— 持平 (7日均值 {avg:.0f})"
+                trend = f"— 持平（7日均值 {avg:.0f}）"
         else:
             trend = "無歷史資料"
 
+        if sc.get("Critical", 0) > 0:
+            accent, banner_bg, icon = "#ef4444", "rgba(239,68,68,0.08)", "🔴"
+            headline = f"今日共 {today} 筆異常事件（含 Critical 等級）"
+        elif sc.get("Warning", 0) > 0:
+            accent, banner_bg, icon = "#f59e0b", "rgba(245,158,11,0.08)", "🟡"
+            headline = f"今日共 {today} 筆異常事件"
+        else:
+            accent, banner_bg, icon = "#3b82f6", "rgba(59,130,246,0.08)", "🔵"
+            headline = f"今日共 {today} 筆異常事件（Advisory / 一般記錄）"
+        sub_desc = f"與過去 7 日均值相比：{trend}"
+
         sev_html = ""
-        sev_colors = {"Critical": "#dc3545", "Warning": "#f59e0b",
+        sev_colors = {"Critical": "#ef4444", "Warning": "#f59e0b",
                       "Advisory": "#3b82f6", "Unclassified": "#6b7280"}
         for sev in ("Critical", "Warning", "Advisory", "Unclassified"):
             cnt = sc.get(sev, 0)
@@ -364,78 +435,86 @@ class KepwareLogService:
             sev_html += (
                 f'<span style="display:inline-block;margin:2px 6px 2px 0;'
                 f'padding:3px 10px;background:{color};color:#fff;'
-                f'border-radius:3px;font-size:13px;">'
+                f'border-radius:999px;font-size:12px;font-weight:600;">'
                 f'{sev} {cnt}</span>'
             )
 
+        th_style = (f'background:{self._DAILY_CARD_BG};color:{self._DAILY_MUTED2};'
+                    f'font-weight:600;font-size:11px;text-transform:uppercase;'
+                    f'letter-spacing:0.06em;padding:8px 10px;')
+        td_style = (f'padding:8px 10px;border-bottom:1px solid {self._DAILY_BORDER};'
+                    f'color:{self._DAILY_TEXT};')
+
         ch_html = ""
         if summary["top_channels"]:
-            ch_html = ('<table style="border-collapse:collapse;width:100%;'
-                       'font-size:13px;margin-top:8px;">'
-                       '<tr style="background:#f3f4f6;">'
-                       '<th style="padding:6px 10px;text-align:left;">Channel</th>'
-                       '<th style="padding:6px 10px;text-align:right;">Critical</th>'
-                       '<th style="padding:6px 10px;text-align:right;">Warning</th>'
-                       '<th style="padding:6px 10px;text-align:right;">Advisory</th>'
-                       '<th style="padding:6px 10px;text-align:right;">Other</th>'
-                       '<th style="padding:6px 10px;text-align:right;">Total</th></tr>')
+            ch_html = (
+                '<table style="border-collapse:collapse;width:100%;font-size:13px;margin:8px 0 4px;">'
+                f'<tr><th style="{th_style}text-align:left;">Channel</th>'
+                f'<th style="{th_style}text-align:right;">Critical</th>'
+                f'<th style="{th_style}text-align:right;">Warning</th>'
+                f'<th style="{th_style}text-align:right;">Advisory</th>'
+                f'<th style="{th_style}text-align:right;">Other</th>'
+                f'<th style="{th_style}text-align:right;">Total</th></tr>'
+            )
             for ch in summary["top_channels"]:
                 ch_html += (
-                    f'<tr><td style="padding:4px 10px;">{ch["channel"]}</td>'
-                    f'<td style="padding:4px 10px;text-align:right;">{ch["Critical"]}</td>'
-                    f'<td style="padding:4px 10px;text-align:right;">{ch["Warning"]}</td>'
-                    f'<td style="padding:4px 10px;text-align:right;">{ch["Advisory"]}</td>'
-                    f'<td style="padding:4px 10px;text-align:right;">{ch["Unclassified"]}</td>'
-                    f'<td style="padding:4px 10px;text-align:right;font-weight:bold;">'
+                    f'<tr><td style="{td_style}">{ch["channel"]}</td>'
+                    f'<td style="{td_style}text-align:right;">{ch["Critical"]}</td>'
+                    f'<td style="{td_style}text-align:right;">{ch["Warning"]}</td>'
+                    f'<td style="{td_style}text-align:right;">{ch["Advisory"]}</td>'
+                    f'<td style="{td_style}text-align:right;">{ch["Unclassified"]}</td>'
+                    f'<td style="{td_style}text-align:right;font-weight:700;">'
                     f'{ch["total"]}</td></tr>'
                 )
             ch_html += "</table>"
+        else:
+            ch_html = f'<p style="color:{self._DAILY_MUTED3};font-size:13px;margin:4px 0 16px;">無 Channel 異常</p>'
 
         tag_html = ""
         if summary["top_tags"]:
-            tag_html = ('<table style="border-collapse:collapse;width:100%;'
-                        'font-size:13px;margin-top:8px;">'
-                        '<tr style="background:#f3f4f6;">'
-                        '<th style="padding:6px 10px;text-align:left;">Channel.Device</th>'
-                        '<th style="padding:6px 10px;text-align:left;">Tag Address</th>'
-                        '<th style="padding:6px 10px;text-align:right;">次數</th></tr>')
+            tag_html = (
+                '<table style="border-collapse:collapse;width:100%;font-size:13px;margin:8px 0 4px;">'
+                f'<tr><th style="{th_style}text-align:left;">Channel.Device</th>'
+                f'<th style="{th_style}text-align:left;">Tag Address</th>'
+                f'<th style="{th_style}text-align:right;">次數</th></tr>'
+            )
             for t in summary["top_tags"]:
                 tag_html += (
-                    f'<tr><td style="padding:4px 10px;">'
-                    f'{t["channel"]}.{t["device"]}</td>'
-                    f'<td style="padding:4px 10px;font-family:monospace;font-size:12px;">'
+                    f'<tr><td style="{td_style}">{t["channel"]}.{t["device"]}</td>'
+                    f'<td style="{td_style}font-family:monospace;font-size:12px;color:{self._DAILY_MUTED};">'
                     f'{t["tag_address"]}</td>'
-                    f'<td style="padding:4px 10px;text-align:right;">{t["cnt"]}</td></tr>'
+                    f'<td style="{td_style}text-align:right;">{t["cnt"]}</td></tr>'
                 )
             tag_html += "</table>"
+        else:
+            tag_html = f'<p style="color:{self._DAILY_MUTED3};font-size:13px;margin:4px 0 16px;">無 Tag 讀取異常</p>'
 
-        html_body = f"""<html><body style="font-family:Arial,sans-serif;color:#333;margin:0;padding:0;">
-<div style="max-width:700px;margin:20px auto;">
-  <div style="padding:12px 20px;background:#f0f9ff;border-left:5px solid #2563eb;margin-bottom:16px;">
-    <span style="font-size:16px;font-weight:bold;color:#2563eb;">
-      Kepware 事件日報 — {self.server_name}</span>
-    <span style="float:right;color:#666;">{date_str}</span>
+        html_body = f"""<html><body style="margin:0;padding:0;background:{self._DAILY_BG};
+    font-family:'Microsoft JhengHei',Arial,sans-serif;">
+<div style="max-width:640px;margin:0 auto;padding:24px 16px;">
+{self._daily_summary_header(accent, date_str)}
+  <div style="background:{self._DAILY_BG};padding:24px;border-radius:0 0 8px 8px;
+              border:1px solid {self._DAILY_BORDER};border-top:none;">
+{self._daily_summary_banner(accent, banner_bg, icon, headline, sub_desc)}
+
+    <div style="text-align:center;padding:16px;background:{self._DAILY_CARD_BG};
+                border-radius:8px;border:1px solid {self._DAILY_BORDER};margin-bottom:8px;">
+      <div style="font-size:11px;color:{self._DAILY_MUTED2};text-transform:uppercase;
+                  letter-spacing:0.1em;margin-bottom:6px;">今日異常事件</div>
+      <div style="font-size:40px;font-weight:800;font-family:monospace;color:{accent};">{today}</div>
+      <div style="font-size:12px;color:{self._DAILY_MUTED3};margin-top:4px;">{trend}</div>
+    </div>
+
+{self._daily_summary_section_title("嚴重等級分佈")}
+    <div>{sev_html}</div>
+
+{self._daily_summary_section_title("Channel 異常排行")}
+    {ch_html}
+
+{self._daily_summary_section_title("Tag 讀取異常")}
+    {tag_html}
   </div>
-
-  <table style="border-collapse:collapse;width:100%;font-size:14px;">
-    <tr><td style="padding:6px 12px;font-weight:bold;">總異常事件</td>
-        <td style="padding:6px 12px;">
-          <span style="font-size:1.2em;font-weight:bold;">{today}</span> 筆</td></tr>
-    <tr><td style="padding:6px 12px;font-weight:bold;">趨勢</td>
-        <td style="padding:6px 12px;">{trend}</td></tr>
-    <tr><td style="padding:6px 12px;font-weight:bold;">嚴重等級分佈</td>
-        <td style="padding:6px 12px;">{sev_html}</td></tr>
-  </table>
-
-  <h3 style="font-size:14px;color:#333;margin:20px 0 8px;">Channel 異常排行</h3>
-  {ch_html if ch_html else '<p style="color:#999;font-size:13px;">無 Channel 異常</p>'}
-
-  <h3 style="font-size:14px;color:#333;margin:20px 0 8px;">Tag 讀取異常</h3>
-  {tag_html if tag_html else '<p style="color:#999;font-size:13px;">無 Tag 讀取異常</p>'}
-
-  <hr style="border:none;border-top:1px solid #e0e0e0;margin:20px 0;">
-  <p style="font-size:12px;color:#999;">
-    此為每日自動彙整報告，詳細紀錄請至 Web UI 查詢。</p>
+{self._daily_summary_footer()}
 </div>
 </body></html>"""
 
