@@ -10,6 +10,25 @@
 
 ---
 
+## 修正進度（2026-07-08 更新，使用者確認：全新 DB + 加接第二台 Kepware）
+
+### ✅ 測試前必修，已完成並驗收
+- **B-1 服務靜默死**（commit `e84440e`）：main() 致命例外 `sys.exit(1)`（清理先跑完）、初次連線改非致命（一台連不上不拖垮另一台/整個服務）、`_monitor_loop` 最外層護欄自我復原、[Mail] 缺 key 加 fallback。以 mock 對真正的 main() 實測 exit-code 行為通過。
+  - ⚠️ **依賴人工確認**：`sys.exit(1)` 只有在 WinSW XML 設定了 `<onfailure action="restart" .../>` 時才會真正重啟（M5：WinSW XML 未納版控，無法在 repo 驗證）。**上線前務必確認正式機的 WinSW XML 有此設定，否則 B-1 修正無效。**
+- **H3 多台 dedup 納入 server_name** + **B-2 migration 順序**（commit `7588af4`）：第二台事件不再被靜默丟棄；全新 DB 建立與 per-server 去重實測通過。
+- **H-負值 limit DoS** + **H-requirements 版本鎖**（commit `233d962`）：asyncio 鎖 `>=2.0.0,<3.0.0`（實測 2.0.1，**非**部署 agent 誤建議的 `<2.0.0`）。
+
+### ☑️ 上線閘門（營運檢查，非程式修改）
+- **B-3 改掉 admin/admin 預設密碼**：使用者上線前於 Web UI 自行修改。
+- **B-2 migration**：使用者採全新 DB，本不觸發；仍已一併改正以防未來重用 DB。
+
+### ⏳ 測試穩定後緊接批次（本次刻意未做，避免與 B-1 啟動重構疊加風險）
+- **H2 多台互相阻塞**：一台斷線走完重連（~55s+）期間其他健康台排隊等。需把各 Server 包成併發 asyncio.Task。使用者已確認多台部署，這是下一個優先。
+- **單一 event loop 同步阻塞主題**：email(smtplib)、手動備份、大查詢/匯出、cleanup 改走 `run_in_executor`。
+- 其餘 Medium/Low 見下方各段。
+
+---
+
 ## 最高可信度發現：跨維度收斂
 
 以下兩點是「不同 agent 從不同角度獨立指出同一根因」，可信度最高，列為第一優先：
