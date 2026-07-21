@@ -1,5 +1,6 @@
 import asyncio
 import os
+import sys
 import time
 import logging
 import configparser
@@ -108,6 +109,7 @@ async def main():
 
     manager = None
     webui_task = None
+    fatal_error = False
 
     try:
         # 建立 MonitorManager
@@ -127,9 +129,13 @@ async def main():
         await manager.start()
 
     except KeyboardInterrupt:
+        # 使用者主動停止，屬正常結束（exit 0），WinSW 不應重啟
         logging.info("收到中斷信號，正在停止...")
     except Exception as e:
+        # 非預期的致命例外：記錄後標記，待 finally 清理完成再以非零 exit code 結束，
+        # 讓 WinSW 的 restart 策略能接手重啟，而不是被當成「正常停止」靜默死亡
         logging.exception(f"發生嚴重錯誤: {e}")
+        fatal_error = True
     finally:
         # 取消 Web UI
         if webui_task and not webui_task.done():
@@ -148,6 +154,12 @@ async def main():
                 except Exception:
                     pass
         logging.info("監控程式已停止")
+
+    # 清理已完成，若是致命例外導致結束，以非零 exit code 退出交由 WinSW 重啟。
+    # KeyboardInterrupt 不會設 fatal_error，維持正常退出（exit 0）。
+    if fatal_error:
+        logging.error("因致命例外結束，以 exit code 1 退出（交由 WinSW 重啟服務）")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

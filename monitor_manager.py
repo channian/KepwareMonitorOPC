@@ -114,10 +114,18 @@ class MonitorManager:
         self.db = DatabaseService(
             db_path=config.get("Database", "Path", fallback="data/monitor.db")
         )
+        # 缺 key 不應讓服務在建構時就拋 NoOptionError（會經 main() 同一路徑
+        # 變成靜默死）。改用 fallback="" 讓服務照常啟動，僅記 warning 提醒。
+        smtp_server = config.get("Mail", "SmtpServer", fallback="")
+        sender_email = config.get("Mail", "From", fallback="")
+        if not smtp_server:
+            logging.warning("未設定 [Mail] SmtpServer，Email 告警將無法發送")
+        if not sender_email:
+            logging.warning("未設定 [Mail] From（寄件者），Email 告警將無法發送")
         self.email_service = EmailService(
-            smtp_server=config.get("Mail", "SmtpServer"),
+            smtp_server=smtp_server,
             smtp_port=config.getint("Mail", "Port", fallback=25),
-            sender_email=config.get("Mail", "From"),
+            sender_email=sender_email,
         )
 
         # Webhook 推播
@@ -739,10 +747,20 @@ class MonitorManager:
             logging.warning(f"CSV 中有未匹配的 Server 名稱: {unmatched}，"
                             f"可用連線: {conn_names}，這些設備將不會被監控！")
 
-        # 逐一連線（與舊版一樣，直接 connect，失敗會拋出例外）
+        # 逐一連線：多台 Server 時，任一台初次連線失敗（正式環境常見：對方尚未
+        # 就緒、網路未通）不應中斷整個 start()，也不應讓其他健康的 Server 無法監控。
+        # 失敗者記 warning 並標記為未連線（connected=False），繼續處理下一台；
+        # 斷線的台會由 _monitor_loop 既有的 is_alive()/重連流程自動接手重試。
         for name, conn in self.connections.items():
             log_and_print(f"[{name}] 正在連線到 {conn.url} ...")
-            await conn.connect()
+            try:
+                await conn.connect()
+            except Exception as ex:
+                conn.connected = False
+                logging.warning(
+                    f"[{name}] 初次連線失敗（{ex}），已標記為未連線並繼續啟動，"
+                    f"稍後由主監控迴圈自動重試"
+                )
 
         # 進入主迴圈（DB 舊紀錄清理改為在迴圈中每日執行一次，見 _monitor_loop）
         logging.info("進入主監控迴圈...")
@@ -757,185 +775,199 @@ class MonitorManager:
         last_cleanup_date = None  # 每日清理舊紀錄追蹤（服務長駐執行，避免資料庫無限增長）
 
         while True:
-            now = time.time()
+            # 最外層安全網：迴圈主體內各區塊雖已有自己的 try/except，但 except
+            # 處理器內部（send_connection_alert、diagnose_kepware、reconnect 等）
+            # 若拋出非預期例外會逃逸到 main()，經 exit-0 路徑造成服務靜默死亡。
+            # 這裡多包一層護欄：捕捉到任何非預期例外時記錄後短暫等待再 continue，
+            # 讓迴圈自我復原而不是讓整個服務死掉。KeyboardInterrupt/CancelledError
+            # 屬 BaseException 不會被這裡攔截，維持正常停止流程。
+            try:
+                now = time.time()
 
-            # CSV 熱重載
-            if (now - last_csv_check) >= self.csv_reload_seconds:
-                self.reload_csv_if_needed()
-                last_csv_check = now
+                # CSV 熱重載
+                if (now - last_csv_check) >= self.csv_reload_seconds:
+                    self.reload_csv_if_needed()
+                    last_csv_check = now
 
-            # 依 Server 分組處理
-            is_single_server = len(self.connections) == 1
-            for conn_name, conn in self.connections.items():
-                # 篩選此 Server 的設備
-                # 單台模式：CSV 中 Server 名稱不論填什麼都歸到這台
-                if is_single_server:
-                    server_devices = [
-                        d for d in self.devices
-                        if d.nodeid and d.enable
-                    ]
-                else:
-                    server_devices = [
-                        d for d in self.devices
-                        if d.server_name == conn_name and d.nodeid and d.enable
-                    ]
-                if not server_devices:
-                    logging.debug(f"[{conn_name}] 無匹配的監控設備 "
-                                  f"(總設備數={len(self.devices)}, "
-                                  f"連線名稱='{conn_name}')")
-                    continue
-
-                logging.info(f"[{conn_name}] 開始讀取 {len(server_devices)} 個設備...")
-
-                # ==========================================
-                # 讀值與重連
-                # ==========================================
-                try:
-                    # 讀值前先做一次輕量健康檢查：asyncua 背景 watchdog
-                    # 偵測到斷線時只會印 log，不會讓下一次 read_values()
-                    # 立刻失敗，這裡讓斷線可以提早被主迴圈感知，不用等到
-                    # 真正讀值失敗才觸發重連。
-                    #
-                    # is_alive() 若不存在（例如部署時漏更新 opc_connection.py，
-                    # 舊版 OPCConnection 沒有這個方法）不能直接讓 AttributeError
-                    # 被下面的 except 當成「連線斷掉」處理——那樣會導致每一輪
-                    # 都誤判斷線、觸發不必要的重連，反而比沒有健康檢查更不穩定。
-                    # 只在每個連線第一次遇到時警告一次，之後靜默略過健康檢查，
-                    # 行為等同退回舊版（只靠 read_values() 例外判斷斷線）。
-                    is_alive_fn = getattr(conn, "is_alive", None)
-                    if is_alive_fn is None:
-                        if conn_name not in self._is_alive_missing_warned:
-                            logging.warning(
-                                f"[{conn_name}] OPCConnection 缺少 is_alive() 方法"
-                                f"（部署檔案可能未同步更新 opc_connection.py），"
-                                f"本次執行將略過連線健康檢查，僅依讀值例外判斷斷線"
-                            )
-                            self._is_alive_missing_warned.add(conn_name)
-                    elif not await is_alive_fn():
-                        raise ConnectionError(
-                            f"[{conn_name}] 連線健康檢查失敗（背景 watchdog 已偵測到斷線）"
-                        )
-                    values = await conn.read_values(
-                        [{"nodeid": d.nodeid, "name": d.name} for d in server_devices]
-                    )
-                except Exception as ex:
-                    log_and_print(f"[{conn_name}] 讀取失敗或連線斷掉: {ex}")
-
-                    # --- 重連邏輯：短間隔連續重試數次，避免只試一次就要
-                    # 等到下一個完整 check_interval 才有機會再試 ---
-                    success = False
-                    for attempt in range(1, RECONNECT_RETRY_ATTEMPTS + 1):
-                        success = await conn.reconnect()
-                        if success:
-                            break
-                        if attempt < RECONNECT_RETRY_ATTEMPTS:
-                            log_and_print(f"[{conn_name}] 第 {attempt}/{RECONNECT_RETRY_ATTEMPTS} "
-                                          f"次重連失敗，{RECONNECT_RETRY_DELAY} 秒後再試...")
-                            await asyncio.sleep(RECONNECT_RETRY_DELAY)
-
-                    if success:
-                        log_and_print(f"[{conn_name}] 重新連線成功！立即重試讀取...")
-                        if self.connection_fail_counts.get(conn_name, 0) > 0:
-                            # 曾經連續失敗過（已寄過斷線告警），寄送復歸通知
-                            try:
-                                diag_result = await conn.diagnose_kepware()
-                            except Exception:
-                                diag_result = DiagnosticResult(
-                                    DiagnosticResult.LEVEL_OK,
-                                    f"[{conn_name}] 已恢復連線",
-                                )
-                            self.send_connection_alert(conn_name, diag_result, is_recovery=True)
-                        self.connection_fail_counts[conn_name] = 0
-
-                        # 立即重試讀值（原本這裡的 continue 只會跳到 for 迴圈
-                        # 的下一台 Server，多台部署時剛重連成功的這台要等到
-                        # 下一輪整體迴圈才會真正重試，與上面的 log 訊息不符）
-                        try:
-                            values = await conn.read_values(
-                                [{"nodeid": d.nodeid, "name": d.name} for d in server_devices]
-                            )
-                        except Exception as ex2:
-                            log_and_print(f"[{conn_name}] 重連後立即重試讀取仍失敗: {ex2}，"
-                                          f"將於下一輪重試")
-                            continue
-                        # 不 continue，直接往下走到「數據處理與警報」區塊
+                # 依 Server 分組處理
+                is_single_server = len(self.connections) == 1
+                for conn_name, conn in self.connections.items():
+                    # 篩選此 Server 的設備
+                    # 單台模式：CSV 中 Server 名稱不論填什麼都歸到這台
+                    if is_single_server:
+                        server_devices = [
+                            d for d in self.devices
+                            if d.nodeid and d.enable
+                        ]
                     else:
-                        fail_count = self.connection_fail_counts.get(conn_name, 0) + 1
-                        self.connection_fail_counts[conn_name] = fail_count
-                        log_and_print(f"[{conn_name}] 連續重試 {RECONNECT_RETRY_ATTEMPTS} 次仍無法"
-                                      f"重新連線，將留待下一輪 ({self.check_interval} 秒後) 再試..."
-                                      f"(連續失敗週期 {fail_count} 次)")
-
-                        # 降噪：首次失敗寄送一次告警，之後不再重複，
-                        # 直到連續失敗次數達到升級門檻才再寄一次
-                        if fail_count == 1 or fail_count == RECONNECT_ALERT_THRESHOLD:
-                            try:
-                                diag_result = await conn.diagnose_kepware()
-                            except Exception:
-                                diag_result = DiagnosticResult(
-                                    DiagnosticResult.LEVEL_HOST_DOWN,
-                                    f"[{conn_name}] 連線異常: {ex}",
-                                )
-                            if fail_count == RECONNECT_ALERT_THRESHOLD:
-                                diag_result.message = (
-                                    f"{diag_result.message}"
-                                    f"（已連續重連失敗 {fail_count} 次，請儘速確認）"
-                                )
-                            self.send_connection_alert(conn_name, diag_result)
-
+                        server_devices = [
+                            d for d in self.devices
+                            if d.server_name == conn_name and d.nodeid and d.enable
+                        ]
+                    if not server_devices:
+                        logging.debug(f"[{conn_name}] 無匹配的監控設備 "
+                                      f"(總設備數={len(self.devices)}, "
+                                      f"連線名稱='{conn_name}')")
                         continue
 
-                # ==========================================
-                # 數據處理與警報
-                # ==========================================
-                current_ts = time.time()
-                for device, raw_value in zip(server_devices, values):
-                    try:
-                        await self._process_device(device, raw_value, conn_name, current_ts)
-                    except Exception as ex:
-                        logging.exception(f"[{conn_name}] 處理設備 {device.name} 發生錯誤: {ex}")
+                    logging.info(f"[{conn_name}] 開始讀取 {len(server_devices)} 個設備...")
 
-            # Kepware Log polling（多台）
-            for kl in self.kepware_logs:
-                last_t = last_kepware_log_poll.get(kl.server_name, 0)
-                if (now - last_t) >= kl.poll_interval:
+                    # ==========================================
+                    # 讀值與重連
+                    # ==========================================
                     try:
-                        await asyncio.get_running_loop().run_in_executor(
-                            None, kl.poll
+                        # 讀值前先做一次輕量健康檢查：asyncua 背景 watchdog
+                        # 偵測到斷線時只會印 log，不會讓下一次 read_values()
+                        # 立刻失敗，這裡讓斷線可以提早被主迴圈感知，不用等到
+                        # 真正讀值失敗才觸發重連。
+                        #
+                        # is_alive() 若不存在（例如部署時漏更新 opc_connection.py，
+                        # 舊版 OPCConnection 沒有這個方法）不能直接讓 AttributeError
+                        # 被下面的 except 當成「連線斷掉」處理——那樣會導致每一輪
+                        # 都誤判斷線、觸發不必要的重連，反而比沒有健康檢查更不穩定。
+                        # 只在每個連線第一次遇到時警告一次，之後靜默略過健康檢查，
+                        # 行為等同退回舊版（只靠 read_values() 例外判斷斷線）。
+                        is_alive_fn = getattr(conn, "is_alive", None)
+                        if is_alive_fn is None:
+                            if conn_name not in self._is_alive_missing_warned:
+                                logging.warning(
+                                    f"[{conn_name}] OPCConnection 缺少 is_alive() 方法"
+                                    f"（部署檔案可能未同步更新 opc_connection.py），"
+                                    f"本次執行將略過連線健康檢查，僅依讀值例外判斷斷線"
+                                )
+                                self._is_alive_missing_warned.add(conn_name)
+                        elif not await is_alive_fn():
+                            raise ConnectionError(
+                                f"[{conn_name}] 連線健康檢查失敗（背景 watchdog 已偵測到斷線）"
+                            )
+                        values = await conn.read_values(
+                            [{"nodeid": d.nodeid, "name": d.name} for d in server_devices]
                         )
                     except Exception as ex:
-                        logging.error(f"Kepware Log[{kl.server_name}] polling 錯誤: {ex}")
-                    last_kepware_log_poll[kl.server_name] = time.time()
+                        log_and_print(f"[{conn_name}] 讀取失敗或連線斷掉: {ex}")
 
-            # Kepware 排程備份檢查
-            if hasattr(self, 'backup_schedule') and self.backup_schedule:
+                        # --- 重連邏輯：短間隔連續重試數次，避免只試一次就要
+                        # 等到下一個完整 check_interval 才有機會再試 ---
+                        success = False
+                        for attempt in range(1, RECONNECT_RETRY_ATTEMPTS + 1):
+                            success = await conn.reconnect()
+                            if success:
+                                break
+                            if attempt < RECONNECT_RETRY_ATTEMPTS:
+                                log_and_print(f"[{conn_name}] 第 {attempt}/{RECONNECT_RETRY_ATTEMPTS} "
+                                              f"次重連失敗，{RECONNECT_RETRY_DELAY} 秒後再試...")
+                                await asyncio.sleep(RECONNECT_RETRY_DELAY)
+
+                        if success:
+                            log_and_print(f"[{conn_name}] 重新連線成功！立即重試讀取...")
+                            if self.connection_fail_counts.get(conn_name, 0) > 0:
+                                # 曾經連續失敗過（已寄過斷線告警），寄送復歸通知
+                                try:
+                                    diag_result = await conn.diagnose_kepware()
+                                except Exception:
+                                    diag_result = DiagnosticResult(
+                                        DiagnosticResult.LEVEL_OK,
+                                        f"[{conn_name}] 已恢復連線",
+                                    )
+                                self.send_connection_alert(conn_name, diag_result, is_recovery=True)
+                            self.connection_fail_counts[conn_name] = 0
+
+                            # 立即重試讀值（原本這裡的 continue 只會跳到 for 迴圈
+                            # 的下一台 Server，多台部署時剛重連成功的這台要等到
+                            # 下一輪整體迴圈才會真正重試，與上面的 log 訊息不符）
+                            try:
+                                values = await conn.read_values(
+                                    [{"nodeid": d.nodeid, "name": d.name} for d in server_devices]
+                                )
+                            except Exception as ex2:
+                                log_and_print(f"[{conn_name}] 重連後立即重試讀取仍失敗: {ex2}，"
+                                              f"將於下一輪重試")
+                                continue
+                            # 不 continue，直接往下走到「數據處理與警報」區塊
+                        else:
+                            fail_count = self.connection_fail_counts.get(conn_name, 0) + 1
+                            self.connection_fail_counts[conn_name] = fail_count
+                            log_and_print(f"[{conn_name}] 連續重試 {RECONNECT_RETRY_ATTEMPTS} 次仍無法"
+                                          f"重新連線，將留待下一輪 ({self.check_interval} 秒後) 再試..."
+                                          f"(連續失敗週期 {fail_count} 次)")
+
+                            # 降噪：首次失敗寄送一次告警，之後不再重複，
+                            # 直到連續失敗次數達到升級門檻才再寄一次
+                            if fail_count == 1 or fail_count == RECONNECT_ALERT_THRESHOLD:
+                                try:
+                                    diag_result = await conn.diagnose_kepware()
+                                except Exception:
+                                    diag_result = DiagnosticResult(
+                                        DiagnosticResult.LEVEL_HOST_DOWN,
+                                        f"[{conn_name}] 連線異常: {ex}",
+                                    )
+                                if fail_count == RECONNECT_ALERT_THRESHOLD:
+                                    diag_result.message = (
+                                        f"{diag_result.message}"
+                                        f"（已連續重連失敗 {fail_count} 次，請儘速確認）"
+                                    )
+                                self.send_connection_alert(conn_name, diag_result)
+
+                            continue
+
+                    # ==========================================
+                    # 數據處理與警報
+                    # ==========================================
+                    current_ts = time.time()
+                    for device, raw_value in zip(server_devices, values):
+                        try:
+                            await self._process_device(device, raw_value, conn_name, current_ts)
+                        except Exception as ex:
+                            logging.exception(f"[{conn_name}] 處理設備 {device.name} 發生錯誤: {ex}")
+
+                # Kepware Log polling（多台）
                 for kl in self.kepware_logs:
+                    last_t = last_kepware_log_poll.get(kl.server_name, 0)
+                    if (now - last_t) >= kl.poll_interval:
+                        try:
+                            await asyncio.get_running_loop().run_in_executor(
+                                None, kl.poll
+                            )
+                        except Exception as ex:
+                            logging.error(f"Kepware Log[{kl.server_name}] polling 錯誤: {ex}")
+                        last_kepware_log_poll[kl.server_name] = time.time()
+
+                # Kepware 排程備份檢查
+                if hasattr(self, 'backup_schedule') and self.backup_schedule:
+                    for kl in self.kepware_logs:
+                        try:
+                            await asyncio.get_running_loop().run_in_executor(
+                                None, kl.check_weekly_backup, self.backup_schedule
+                            )
+                        except Exception as ex:
+                            logging.error(f"Kepware Backup[{kl.server_name}] 檢查錯誤: {ex}")
+
+                # 每日清理舊 DB 紀錄（服務長駐執行，可能數月不重啟，
+                # 不能只在 start() 執行一次，否則資料會無限增長）
+                today_str = datetime.now().strftime("%Y-%m-%d")
+                if today_str != last_cleanup_date:
+                    if self.kepware_logs:
+                        retention = max(kl.retention_days for kl in self.kepware_logs)
+                    else:
+                        retention = 90
                     try:
                         await asyncio.get_running_loop().run_in_executor(
-                            None, kl.check_weekly_backup, self.backup_schedule
+                            None, self.db.cleanup_old_records, retention
                         )
                     except Exception as ex:
-                        logging.error(f"Kepware Backup[{kl.server_name}] 檢查錯誤: {ex}")
+                        logging.error(f"每日清理舊紀錄失敗: {ex}")
+                    last_cleanup_date = today_str
 
-            # 每日清理舊 DB 紀錄（服務長駐執行，可能數月不重啟，
-            # 不能只在 start() 執行一次，否則資料會無限增長）
-            today_str = datetime.now().strftime("%Y-%m-%d")
-            if today_str != last_cleanup_date:
-                if self.kepware_logs:
-                    retention = max(kl.retention_days for kl in self.kepware_logs)
-                else:
-                    retention = 90
-                try:
-                    await asyncio.get_running_loop().run_in_executor(
-                        None, self.db.cleanup_old_records, retention
-                    )
-                except Exception as ex:
-                    logging.error(f"每日清理舊紀錄失敗: {ex}")
-                last_cleanup_date = today_str
+                # 等待下一輪
+                log_and_print(f"等待 {self.check_interval} 秒後更新...")
+                await asyncio.sleep(self.check_interval)
 
-            # 等待下一輪
-            log_and_print(f"等待 {self.check_interval} 秒後更新...")
-            await asyncio.sleep(self.check_interval)
+            except Exception as ex:
+                # 迴圈主體任一未預期例外都在此被攔下，避免逃逸到 main() 造成
+                # 服務靜默死亡。記錄後短暫等待再 continue，讓迴圈自我復原。
+                logging.exception(f"主監控迴圈發生未預期例外，將於短暫間隔後自我復原: {ex}")
+                await asyncio.sleep(min(self.check_interval, 30))
+                continue
 
     async def _process_device(self, device, raw_value, conn_name, current_ts):
         """處理單一設備的數值判斷與派報"""
