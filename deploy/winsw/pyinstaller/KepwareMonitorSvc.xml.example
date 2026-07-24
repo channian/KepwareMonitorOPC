@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WinSW 服務設定範本 — 方式 B（PyInstaller 封裝部署）
+
+  使用方式：
+    1. 複製本檔到 C:\Services\KepwareMonitor\KepwareMonitorSvc.xml
+       （檔名必須與同目錄下的 WinSW 執行檔 KepwareMonitorSvc.exe 完全同名，
+       僅副檔名不同）
+    2. 不需要修改任何內容即可使用（%BASE% 由 WinSW 自動代換為 exe 所在目錄）
+    3. 以系統管理員身分執行：
+         KepwareMonitorSvc.exe install
+         KepwareMonitorSvc.exe start
+
+  與方式 A 的差異：<executable> 直接指向 PyInstaller 打包產出的
+  KepwareMonitor.exe，不需要 <arguments> 與 venv。
+
+  重要：<onfailure> 設定不可省略或移除。
+  程式在遇到未預期的致命例外時，會先完成清理再以 exit code 1 結束，
+  依賴這裡的 restart 設定讓 WinSW 接手自動重啟服務；若這段設定被移除，
+  服務死掉後將沒有任何機制自動復原，只能等人發現後手動重啟。
+-->
+<service>
+  <id>KepwareMonitor</id>
+  <name>Kepware Monitor OPC</name>
+  <description>Kepware OPC UA 監控服務 — 設備數值監控、事件記錄、專案備份、Web UI</description>
+
+  <!-- PyInstaller 封裝的執行檔 -->
+  <executable>%BASE%\KepwareMonitor.exe</executable>
+  <workingdirectory>%BASE%</workingdirectory>
+
+  <!-- 服務啟動方式 -->
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+
+  <!-- 異常退出時自動重啟（必要設定，見上方說明） -->
+  <onfailure action="restart" delay="10 sec" />
+  <onfailure action="restart" delay="30 sec" />
+  <onfailure action="restart" delay="60 sec" />
+  <resetfailure>1 hour</resetfailure>
+
+  <!-- 日誌設定（自動 rotate） -->
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+    <logpath>%BASE%\logs</logpath>
+  </log>
+</service>

@@ -392,103 +392,13 @@ DynamicWindow = 24    # 回看歷史筆數
 DynamicK = 3.0        # 預設 k 值
 ```
 
-## 佈署為 Windows 服務（PyInstaller + WinSW）
+## 佈署為 Windows 服務（WinSW）
 
-由於 `asyncua` 套件僅支援特定版本的 Python，建議使用 PyInstaller 封裝成執行檔後，再透過 WinSW 註冊為 Windows Service。
+完整步驟（venv 與 PyInstaller 兩種方式、多台 Kepware 設定、IIS 反向代理選用）請見
+**[docs/deployment-iis.md](docs/deployment-iis.md)**。可直接複製使用的 WinSW 服務設定範本在
+`deploy/winsw/`（`venv/` 與 `pyinstaller/` 各一份 `KepwareMonitorSvc.xml.example`）。
 
-### 1. 安裝 PyInstaller
-
-```bash
-pip install pyinstaller
-```
-
-### 2. 打包執行檔
-
-```bash
-pyinstaller --onefile --name KepwareMonitor ^
-    --add-data "web/templates;web/templates" ^
-    --add-data "web/static;web/static" ^
-    --hidden-import uvicorn.logging ^
-    --hidden-import uvicorn.loops.auto ^
-    --hidden-import uvicorn.protocols.http.auto ^
-    --hidden-import uvicorn.protocols.websockets.auto ^
-    --hidden-import uvicorn.lifespan.on ^
-    kepware_monitor.py
-```
-
-產出檔案在 `dist/KepwareMonitor.exe`。
-
-> **注意：** 若有其他動態 import（如 `asyncua` 子模組），可能需追加 `--hidden-import`。打包後先手動執行 `dist\KepwareMonitor.exe` 確認無 ModuleNotFoundError。
-
-### 3. 佈署目錄結構
-
-將以下檔案複製到目標主機（例如 `C:\KepwareMonitor\`）：
-
-```
-C:\KepwareMonitor\
-├── KepwareMonitor.exe          # PyInstaller 產出
-├── Config\
-│   ├── settings.ini            # 設定檔
-│   └── tags.csv                # 監控設備
-├── data\                       # 自動產生（DB、排程、marker）
-├── logs\                       # 自動產生
-├── KepwareMonitor.xml          # WinSW 設定檔
-└── WinSW.exe                   # WinSW 執行檔（重新命名）
-```
-
-### 4. 下載 WinSW
-
-從 [WinSW Releases](https://github.com/winsw/winsw/releases) 下載 `WinSW-x64.exe`，重新命名為 `KepwareMonitor.exe` 同目錄下的 `KepwareMonitorSvc.exe`（或任意名稱，但 XML 檔名需對應）。
-
-### 5. 建立 WinSW 設定檔
-
-建立 `KepwareMonitorSvc.xml`（檔名需與 WinSW exe 同名）：
-
-```xml
-<service>
-  <id>KepwareMonitor</id>
-  <name>Kepware Monitor OPC</name>
-  <description>Kepware OPC UA 監控系統 - 設備監控、事件記錄、專案備份</description>
-  <executable>%BASE%\KepwareMonitor.exe</executable>
-  <startmode>Automatic</startmode>
-  <log mode="roll-by-size">
-    <sizeThreshold>10240</sizeThreshold>
-    <keepFiles>5</keepFiles>
-  </log>
-  <onfailure action="restart" delay="10 sec"/>
-  <onfailure action="restart" delay="30 sec"/>
-  <onfailure action="none"/>
-</service>
-```
-
-### 6. 安裝與管理服務
-
-以**系統管理員**身分開啟命令提示字元：
-
-```cmd
-cd C:\KepwareMonitor
-
-:: 安裝服務
-KepwareMonitorSvc.exe install
-
-:: 啟動服務
-KepwareMonitorSvc.exe start
-
-:: 查看狀態
-KepwareMonitorSvc.exe status
-
-:: 停止服務
-KepwareMonitorSvc.exe stop
-
-:: 移除服務
-KepwareMonitorSvc.exe uninstall
-```
-
-### 7. 驗證
-
-1. 服務啟動後，瀏覽 `http://localhost:8080` 確認 Web UI 正常
-2. 檢查 `logs\` 目錄下的日誌確認監控運作
-3. 檢查 Windows 事件檢視器（應用程式日誌）確認服務狀態
+> **⚠️ 務必使用 repo 內的範本，不要自行簡化 `<onfailure>` 設定。** 程式遇到未預期的致命例外會先清理再以非零 exit code 結束，依賴 WinSW 的 `onfailure action="restart"` 才能自動重啟；若設定被簡化或省略，服務死掉後不會自動復原。
 
 ## License
 

@@ -100,7 +100,13 @@ curl -L -o C:\Services\KepwareMonitor\KepwareMonitorSvc.exe https://github.com/w
 
 #### 建立服務設定檔
 
-在同一目錄建立 `KepwareMonitorSvc.xml`（檔名必須與 WinSW exe 同名）：
+repo 內已附上可直接複製使用的範本：`deploy/winsw/venv/KepwareMonitorSvc.xml.example`。複製到專案目錄並改名（檔名必須與 WinSW exe 完全同名，僅副檔名不同）：
+
+```powershell
+copy deploy\winsw\venv\KepwareMonitorSvc.xml.example KepwareMonitorSvc.xml
+```
+
+內容如下（不需修改，`%BASE%` 由 WinSW 自動代換為 exe 所在目錄）：
 
 ```xml
 <service>
@@ -134,6 +140,8 @@ curl -L -o C:\Services\KepwareMonitor\KepwareMonitorSvc.exe https://github.com/w
   <env name="PYTHONUNBUFFERED" value="1" />
 </service>
 ```
+
+> **⚠️ `<onfailure>` 設定不可省略或移除。** 程式遇到未預期的致命例外時，會先完成清理再以 exit code 1 結束——這個設計就是依賴這裡的 restart 設定，讓 WinSW 接手自動重啟服務。若這段設定被拿掉，服務死掉後不會有任何機制自動復原，只能等人發現後手動重啟。
 
 ---
 
@@ -192,7 +200,13 @@ curl -L -o C:\Services\KepwareMonitor\KepwareMonitorSvc.exe https://github.com/w
 
 #### 建立服務設定檔
 
-建立 `KepwareMonitorSvc.xml`（檔名必須與 WinSW exe 同名）：
+repo 內已附上可直接複製使用的範本：`deploy/winsw/pyinstaller/KepwareMonitorSvc.xml.example`。複製到專案目錄並改名（檔名必須與 WinSW exe 完全同名，僅副檔名不同）：
+
+```powershell
+copy deploy\winsw\pyinstaller\KepwareMonitorSvc.xml.example KepwareMonitorSvc.xml
+```
+
+內容如下（不需修改）：
 
 ```xml
 <service>
@@ -224,6 +238,8 @@ curl -L -o C:\Services\KepwareMonitor\KepwareMonitorSvc.exe https://github.com/w
 ```
 
 > **方式 B 與 A 的差異：** `<executable>` 指向 `KepwareMonitor.exe`（PyInstaller 產出），不需 `<arguments>` 和 `venv`。
+>
+> **⚠️ `<onfailure>` 設定不可省略或移除**（原因同方式 A，見上方說明）。
 
 ## 安裝與管理服務（A / B 共用）
 
@@ -272,6 +288,35 @@ Get-Service KepwareMonitor
 | `onfailure` | 可設定多層重啟策略（10s → 30s → 60s） |
 | `log mode="roll-by-size"` | 日誌自動 rotate，每 10MB 滾動，保留 5 個檔案 |
 | `PYTHONUNBUFFERED` | 確保 Python 輸出即時寫入日誌（方式 A） |
+
+## 啟用多台 Kepware Server
+
+`Config/settings.example.ini` 已內建雙台範例，兩個區塊要對應同一台 Server：
+
+1. **`[OPC] Servers`**：OPC UA 連線清單，格式 `名稱|opc.tcp://IP:Port`，多台用逗號分隔：
+
+   ```ini
+   [OPC]
+   Servers = kepware_a|opc.tcp://192.168.1.10:49320,
+             kepware_b|opc.tcp://10.0.0.5:49320
+   ```
+
+2. **`[KepwareLog.<名稱>]`**：每台 Kepware 各自的 API Gateway 監控設定（事件/交易 polling、專案備份）。`<名稱>` 必須與上面 `Servers` 裡的名稱**完全一致**（例如 `kepware_b`），這個名稱就是系統內部用來區分兩台資料的 `server_name`。example 檔案裡第二台是註解起來的範本，取消註解並填入實際的 API Gateway 位址、帳密即可：
+
+   ```ini
+   [KepwareLog.kepware_b]
+   Enable = true
+   ApiBaseUrl = http://10.0.0.5:8000
+   Username = admin
+   Password = your_password
+   EventSubject = Kepware 事件監控通知
+   PollInterval = 600
+   # ... 其餘欄位比照 kepware_a，可用相同預設值
+   ```
+
+3. 兩台名稱只要一致對應，Web UI（Tags/歷史/事件/備份）與告警信都會自動依 `server_name` 分開顯示與統計，不需要額外設定。
+
+> 兩台 Server 用同一組 `[OPC] SecurityPolicy/SecurityMode/Authentication`（全域設定，套用到全部連線）；若兩台認證方式不同，目前版本尚不支援分開設定，需先確認兩台可用同一種認證方式連線。
 
 ## IIS 反向代理（選用）
 
@@ -426,7 +471,15 @@ cd C:\Services\KepwareMonitor
 
 ### 程式更新
 
+> **⚠️ 務必用整樹複製（`xcopy /E`），不要手動單檔複製。** 專案內的 `.py` 檔案彼此有相依關係（例如 `monitor_manager.py` 會呼叫 `opc_connection.py` 新增的方法），逐一手動複製容易漏掉其中一個檔案，導致新舊版本混用、行為異常且不易察覺（曾實際發生過：漏複製 `opc_connection.py` 導致監控誤判斷線、比修復前更不穩定）。若受限於環境只能單檔傳輸，更新後務必比對來源與目的地目錄下**所有** `.py` 檔案的修改時間/雜湊完全一致，不要只挑「這次改到的檔案」複製。
+
 **方式 A（venv）：**
+
+`/EXCLUDE` 需要的排除清單已附在 repo：`deploy\winsw\exclude.txt.example`（排除 `Config\settings.ini`、`Config\tags.csv`、`data\`、`logs\`，避免更新時覆蓋掉正式機的設定與資料）。第一次更新前複製一份到專案目錄：
+
+```powershell
+copy deploy\winsw\exclude.txt.example exclude.txt
+```
 
 ```powershell
 cd C:\Services\KepwareMonitor
@@ -434,10 +487,10 @@ cd C:\Services\KepwareMonitor
 # 1. 停止服務
 .\KepwareMonitorSvc.exe stop
 
-# 2. 更新檔案（保留 Config、data、logs）
+# 2. 更新檔案（保留 Config、data、logs，見上方 exclude.txt）
 xcopy /E /Y \\source\KepwareMonitorOPC . /EXCLUDE:exclude.txt
 
-# 3. 更新套件（如有新增）
+# 3. 更新套件（如有新增，requirements.txt 已鎖定版本上限，不會意外裝到不相容新版）
 .\venv\Scripts\pip.exe install -r requirements.txt
 
 # 4. 重啟服務
