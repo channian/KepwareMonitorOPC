@@ -113,9 +113,11 @@ Kepware OPC UA 監控告警系統，部署於 Windows 內網環境（測試機 K
 
 ### P2 — 品質與安全（內網環境，風險較低）
 
-**P2-5. PyInstaller 打包實測**
+**P2-5. PyInstaller 打包實測 — 部分完成（2026-07-24）**
 
-文件已寫，但打包流程尚未在目標 Windows 機器實測（hidden imports：`uvicorn` 的 loop/protocol 子模組常漏）。首次打包預留除錯時間。
+打包設定已改寫成 `KepwareMonitor.spec`（用 `collect_submodules()` 涵蓋 `uvicorn`/`asyncua`/`jinja2`，比原本手動列 `--hidden-import` 更不容易漏），並在 Linux sandbox 實際跑過一次完整打包 + 啟動煙霧測試：成功產生執行檔、Web UI 正常啟動、`/api/health` 正常回應、`multipart`（登入表單依賴）確認有被打包進去、B-1 的初次連線失敗/Mail fallback 行為在打包後的執行檔裡也正常運作。
+
+**仍需要的**：這只驗證了「打包機制本身正確、Linux 版本可執行」，**尚未在真正的 Windows 機器上產生/執行過 `.exe`**（PyInstaller 不能跨平台編譯，Linux 環境做不出 Windows 執行檔）。使用者第一次在 Windows 開發機執行 `pyinstaller KepwareMonitor.spec` 時，仍建議照文件指示先手動執行 `dist\KepwareMonitor.exe` 確認一次，才進入 WinSW 服務包裝步驟。
 
 **P2-6.（新，測試過程中發現的邊界行為，非 bug，僅供參考）**
 

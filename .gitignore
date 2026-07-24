@@ -14,3 +14,8 @@ __pycache__/
 *.pyo
 .venv/
 venv/
+
+# PyInstaller 打包產物（KepwareMonitor.spec 本身要保留、進版控）
+build/
+dist/
+*.spec.bak

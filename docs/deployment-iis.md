@@ -151,28 +151,21 @@ copy deploy\winsw\venv\KepwareMonitorSvc.xml.example KepwareMonitorSvc.xml
 
 ### 步驟 B1：在開發機打包
 
+打包設定已寫成 `KepwareMonitor.spec`（專案根目錄），不需要再手動組一長串 `--hidden-import` 參數：
+
 ```powershell
 # 安裝 PyInstaller（開發機）
 pip install pyinstaller
 
-# 打包成單一執行檔
-pyinstaller --onefile --name KepwareMonitor ^
-    --add-data "web/templates;web/templates" ^
-    --add-data "web/static;web/static" ^
-    --hidden-import uvicorn.logging ^
-    --hidden-import uvicorn.loops.auto ^
-    --hidden-import uvicorn.protocols.http.auto ^
-    --hidden-import uvicorn.protocols.websockets.auto ^
-    --hidden-import uvicorn.lifespan.on ^
-    kepware_monitor.py
+# 於專案根目錄執行，打包成單一執行檔
+pyinstaller KepwareMonitor.spec
 ```
 
 產出檔案在 `dist\KepwareMonitor.exe`。
 
-> **注意：** 若執行時出現 `ModuleNotFoundError`，需追加對應的 `--hidden-import`。常見需要追加的模組：
-> - `asyncua` 的子模組（如 `asyncua.crypto`）
-> - `jinja2.ext`
-> - `email.mime.multipart`、`email.mime.text`（Email 相關）
+> **為什麼改用 `.spec` 檔：** 原本用一長串 CLI `--hidden-import` 參數，容易複製貼上時漏行、漏打；`.spec` 是一份會被版控、可以 code review 的 Python 檔案，把所有打包設定集中在一處。`KepwareMonitor.spec` 已用 `collect_submodules()` 涵蓋 `uvicorn`/`asyncua`/`jinja2` 這幾個有動態載入子模組機制的套件（原本 CLI 指令只補了 uvicorn 的部分，並未涵蓋 asyncua 與登入表單需要的 `python-multipart`——若沿用舊指令，登入功能在打包後會直接壞掉），已用實測驗證過（含建立可執行檔並成功啟動 Web UI、驗證登入所需的 `multipart` 模組確實被打包進去）。
+>
+> 若未來新增相依套件後打包仍出現 `ModuleNotFoundError`，**請直接修改 `KepwareMonitor.spec`** 把缺少的模組加進 `hidden_imports`，不要只在當次手動加 CLI flag（那樣下次打包又會重現同樣的問題）。
 >
 > 打包後務必先在開發機手動執行 `dist\KepwareMonitor.exe` 確認無誤。
 
