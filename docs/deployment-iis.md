@@ -363,10 +363,20 @@ Get-Service KepwareMonitor
         </rule>
       </rules>
     </rewrite>
-    <webSocket enabled="true" />
   </system.webServer>
 </configuration>
 ```
+
+> **不要加 `<webSocket enabled="true" />`。** 本專案的即時更新（Dashboard）使用 SSE（Server-Sent Events，`text/event-stream`），**沒有用到 WebSocket**；而 `system.webServer/webSocket` 區段在 IIS 預設是鎖定、不允許站台層級覆寫的，加了會讓整個站台回
+> `HTTP 500.19 (0x80070021) — 設定區段在上層被鎖定`，連首頁都打不開。
+
+### SSE 即時更新：關閉 ARR 回應緩衝
+
+ARR 預設會緩衝後端回應才轉發，這會讓 SSE 的即時推播被卡住（Dashboard 數值不會即時更新，可能要等連線關閉才一次跳出來）。設定方式：
+
+IIS 管理員 → 點選**最上層伺服器節點** → **Application Request Routing Cache** → 右側 **Server Proxy Settings** → 把 **Response buffer threshold (KB)** 改為 `0` → 套用。
+
+（若 Dashboard 透過 IIS 存取時數值不即時、但直連 `http://IP:8080` 正常，就是這個設定沒關。）
 
 ### HTTPS 設定（建議）
 
@@ -450,11 +460,34 @@ cd C:\Services\KepwareMonitor
 .\KepwareMonitor.exe
 ```
 
+### IIS 500.19（首頁完全打不開）
+
+先看 IIS log（`C:\inetpub\logs\LogFiles\W3SVC<站台ID>\`）最後一欄的 `sc-win32-status`，不同代碼原因完全不同：
+
+| win32 code | 意義 | 處理 |
+|---|---|---|
+| `13` | 設定區段無法辨識 | URL Rewrite 模組沒裝成功。到「控制台 → 程式和功能」確認有 `IIS URL Rewrite Module 2`；裝完後**要把 IIS 管理員視窗完全關閉再重開**才會出現圖示（只按 F5 或 `iisreset` 不會刷新介面） |
+| `33` | 設定區段在上層被鎖定 | `web.config` 用到不允許站台層級覆寫的區段。最常見是誤加了 `<webSocket>`（本專案不需要，見上方說明）。若確認是 `<rewrite>` 被鎖，執行：`%windir%\system32\inetsrv\appcmd.exe unlock config -section:system.webServer/rewrite` |
+| `5` | 存取被拒 | IIS 執行身分對 `web.config` 沒有讀取權限，檢查該檔案的 NTFS 權限 |
+
+> **排查前先確認請求真的送到正確站台**：IIS log 資料夾 `W3SVC<N>` 的 `<N>` 是站台 ID（IIS 管理員 → Sites 清單的 ID 欄位）。若請求跑到 `Default Web Site` 的 log 裡，代表站台繫結的主機名稱沒對上，改設定 `KepwareMonitor` 站台的 `web.config` 是不會有任何效果的。
+
 ### IIS 502 Bad Gateway
 
 1. 確認 Python 服務有在跑：`netstat -an | findstr "8080"`
 2. 確認 ARR Proxy 已啟用
 3. 檢查 IIS 錯誤日誌：`C:\inetpub\logs\LogFiles\`
+
+### 用 hostname 連不上，但 `http://IP:8080` 正常
+
+`http://IP:8080` 是**直接打到後端 uvicorn、完全繞過 IIS**，這條通不代表 IIS 反向代理有在運作（IIS 服務停掉它照樣會通）。要驗證 IIS，網址必須是**不帶 port** 的 `http://<hostname>`。
+
+若 hostname 連不上，依序確認：
+
+1. **DNS 有沒有解析**：在用戶端執行 `nslookup <hostname>`。若解析不到，在測試機的 `C:\Windows\System32\drivers\etc\hosts` 加一行 `<伺服器IP>  <hostname>`（只填 hostname，不含 `http://`），存檔後 `ipconfig /flushdns`。
+   > hosts 只對編輯的那台電腦有效，僅適合自己驗證；要讓其他人也能用，需請網管在內部 DNS 加 A 記錄。
+2. **站台繫結**：IIS 管理員 → 站台 → 繫結，確認有 `http` / port `80` / 主機名稱與網址列完全一致。
+3. **確認是哪個站台在回應**：見上方 500.19 段落的站台 ID 說明。`Default Web Site` 通常是無主機名稱的 catch-all，會攔截沒對上其他站台的請求，排查時可暫時停用以排除干擾。
 
 ### OPC UA 連線失敗
 
