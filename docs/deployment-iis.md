@@ -284,32 +284,129 @@ Get-Service KepwareMonitor
 
 ## 啟用多台 Kepware Server
 
-`Config/settings.example.ini` 已內建雙台範例，兩個區塊要對應同一台 Server：
+### 先理解：兩個各自獨立的設定區塊
 
-1. **`[OPC] Servers`**：OPC UA 連線清單，格式 `名稱|opc.tcp://IP:Port`，多台用逗號分隔：
+| 區塊 | 負責 | 資料會出現在 |
+|---|---|---|
+| `[OPC] Servers` | OPC UA 點位數值監控（讀 tag、閾值告警） | Dashboard 連線狀態、設備列表、歷史查詢 |
+| `[KepwareLog.<名稱>]` | Kepware API Gateway 監控（事件/交易 polling、專案備份） | 事件記錄頁、交易記錄頁、備份頁 |
 
-   ```ini
-   [OPC]
-   Servers = kepware_a|opc.tcp://192.168.1.10:49320,
-             kepware_b|opc.tcp://10.0.0.5:49320
-   ```
+兩者技術上**互相獨立**，可以只設其中一個（例如只監控 Gateway 事件、不接 OPC 點位）。但只要是同一台實體 Kepware，**名稱一定要取一致**——因為 Dashboard 的連線狀態來自 `[OPC] Servers`，備份頁的 Server 下拉選單來自 `[KepwareLog.*]`，名稱不一致不會壞掉，但你會在不同頁面看到兩組不同的名字，事後很難對帳。
 
-2. **`[KepwareLog.<名稱>]`**：每台 Kepware 各自的 API Gateway 監控設定（事件/交易 polling、專案備份）。`<名稱>` 必須與上面 `Servers` 裡的名稱**完全一致**（例如 `kepware_b`），這個名稱就是系統內部用來區分兩台資料的 `server_name`。example 檔案裡第二台是註解起來的範本，取消註解並填入實際的 API Gateway 位址、帳密即可：
+---
 
-   ```ini
-   [KepwareLog.kepware_b]
-   Enable = true
-   ApiBaseUrl = http://10.0.0.5:8000
-   Username = admin
-   Password = your_password
-   EventSubject = Kepware 事件監控通知
-   PollInterval = 600
-   # ... 其餘欄位比照 kepware_a，可用相同預設值
-   ```
+### ⚠️ 加第二台之前必讀：CSV `Server` 欄位的行為會改變
 
-3. 兩台名稱只要一致對應，Web UI（Tags/歷史/事件/備份）與告警信都會自動依 `server_name` 分開顯示與統計，不需要額外設定。
+這是加第二台最容易踩、而且**完全靜默**的地雷：
 
-> 兩台 Server 用同一組 `[OPC] SecurityPolicy/SecurityMode/Authentication`（全域設定，套用到全部連線）；若兩台認證方式不同，目前版本尚不支援分開設定，需先確認兩台可用同一種認證方式連線。
+| 目前（單台） | 加了第二台之後 |
+|---|---|
+| CSV 的 `Server` 欄位**完全被忽略**，所有 `Enable=TRUE` 且有 NodeId 的設備都歸那一台 | 改成**嚴格比對**，`Server` 值必須與連線名稱完全相同，否則該設備**直接不被監控** |
+
+也就是說：你現在 CSV 裡 `Server` 欄位不管填什麼（甚至留空）都能正常運作，但第二台一加上去，填錯或留空的那些設備會**無聲無息地停止監控**——不會報錯、Web UI 也不會標示，只有設備數量對不上。
+
+實測確認的比對規則（`monitor_manager.py` `_parse_csv_row`）：
+
+| CSV `Server` 欄位填法 | 實際解析結果 | 多台模式下 |
+|---|---|---|
+| `kepware_a` | `kepware_a` | ✅ 正常 |
+| ` kepware_a `（前後空白） | `kepware_a`（自動 trim） | ✅ 正常 |
+| `Kepware_A`（大小寫不同） | `Kepware_A` | ❌ **大小寫敏感，不匹配** |
+| 留空 / 只有空白 | `''`（空字串，**不是** `default`） | ❌ **不匹配** |
+| 整個欄位不存在 | `default` | ❌ 除非真的有一台叫 `default` |
+
+**另一個要注意的點**：未匹配的警告**只在服務啟動時**檢查（`start()` 會記一筆 `logging.warning` 列出未匹配名稱）。之後從 Web UI 的 Tags 頁改 CSV，即使打錯 Server 名稱也**不會有任何警告**——熱重載不做這個檢查。所以改完 Tags 建議重啟一次服務，讓啟動檢查幫你把關。
+
+---
+
+### 步驟 1：先把 CSV 的 `Server` 欄位補正確
+
+**在改 settings.ini 之前先做這一步**，因為單台模式下錯誤是看不出來的。打開 `Config/tags.csv`（或 Web UI 的 Tags 頁），確認每一列的 `Server` 欄位都填了正確、大小寫相符的名稱，沒有留空。
+
+### 步驟 2：設定 `[OPC] Servers`
+
+```ini
+[OPC]
+Servers = kepware_a|opc.tcp://192.168.1.10:49320,
+          kepware_b|opc.tcp://10.0.0.5:49320
+```
+
+格式是 `名稱|opc.tcp://IP:Port`，多台用逗號分隔（可換行縮排，configparser 會接續）。
+
+> 兩台共用同一組 `[OPC] SecurityPolicy` / `SecurityMode` / `Authentication` / `Username` / `Password`（全域設定，套用到所有連線）。若兩台認證方式不同，目前版本不支援分開設定，需先確認兩台能用同一種方式連線。
+
+### 步驟 3：設定 `[KepwareLog.<名稱>]`
+
+`Config/settings.example.ini` 裡第二台是註解起來的範本，取消註解並填入實際位址帳密。**section 名稱中 `.` 後面的字串就是 `server_name`**，要與步驟 2 的名稱一致：
+
+```ini
+[KepwareLog.kepware_b]
+Enable = true
+ApiBaseUrl = http://10.0.0.5:8000
+Username = admin
+Password = your_password
+EventSubject = Kepware 事件監控通知
+PollInterval = 600
+# 其餘嚴重等級分類/閾值欄位比照 kepware_a，可用相同預設值
+```
+
+### 步驟 4：重啟服務並自檢
+
+```powershell
+KepwareMonitorSvc.exe restart
+```
+
+**(a) 看啟動 log**（`logs\*.log`），這三件事都要確認：
+
+```
+[kepware_a] 正在連線到 opc.tcp://... ←  兩台都要各出現一次
+[kepware_b] 正在連線到 opc.tcp://...
+已載入 N 個監控項目
+```
+
+如果出現這行，代表有設備的 `Server` 名稱對不上，**這些設備不會被監控**，回步驟 1 修正：
+
+```
+CSV 中有未匹配的 Server 名稱: {...}，可用連線: {...}，這些設備將不會被監控！
+```
+
+**(b) 用 `/api/health` 一次確認兩半邊**（這支不需登入）：
+
+```powershell
+curl http://localhost:8080/api/health
+```
+
+`opc_connections` 要有兩筆且 `connected: true`；`kepware_logs` 也要有兩筆：
+
+```json
+{
+  "status": "ok",
+  "opc_connections": [
+    {"server": "kepware_a", "url": "opc.tcp://...", "connected": true},
+    {"server": "kepware_b", "url": "opc.tcp://...", "connected": true}
+  ],
+  "kepware_logs": [
+    {"server": "kepware_a", "poll_interval": 600, ...},
+    {"server": "kepware_b", "poll_interval": 600, ...}
+  ]
+}
+```
+
+> `devices.total` / `enabled` 是**全部加總、不分 Server**，看不出第二台的設備有沒有被正確匹配——那要靠上面 (a) 的 log 或下面 (c) 的 Dashboard。
+
+**(c) 開 Dashboard 目視確認**：設備列表有 `Server` 欄位，確認兩台的設備都出現、數量與 CSV 相符。
+
+---
+
+### 已知行為與限制
+
+- **第二台還沒開通也可以先設定**：初次連線失敗不會中斷啟動，該台只會記一筆 warning 並標記為未連線，第一台照常監控，之後由主監控迴圈自動重試連線。所以可以先把設定寫好，等網路/port 開通後它會自己接上，不需要改設定或重啟。
+- **一台斷線會拖慢另一台**：目前各 Server 是在同一個迴圈內**依序處理**，某台斷線時會走完重連流程（最壞情況約 1～2 分鐘）才輪到下一台，期間另一台健康的 Server 讀值與告警會被延後。這是已知限制（複查報告 H2），不影響正確性，只影響故障時的反應速度。
+- **事件去重已按 Server 分開**：兩台送出時間與訊息內容完全相同的事件不會互相被當成重複而丟棄（去重雜湊已納入 `server_name`）。
+- **告警信的 Server 標示位置不一致**（若你要用信件主旨設 Outlook 收信規則要注意）：
+  - Kepware 事件告警、連線異常/復歸告警：**主旨就有** Server 名稱（例如 `[緊急] ... - [kepware_b] 關鍵事件`）
+  - 設備數值告警：主旨只有設備名稱，Server 名稱在**信件內文**的「Kepware Server」欄位
+  - 收件人三者都沿用 `[Mail]` 的全域設定（`To` / `Cc`），CSV 的 `MailTo` / `MailCc` 會再額外併入該設備的告警。
 
 ## IIS 反向代理（選用）
 
